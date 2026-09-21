@@ -1,0 +1,24 @@
+# dependencies
+node_modules/
+
+# build output
+.next/
+out/
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+# next.js generated types
+next-env.d.ts
+
+# local database (PGlite data directory)
+.data/
+
+# secrets — only .env.example is committed
+.env
+.env.local
+.env.*.local
+
+# misc
+*.log
+coverage/
+kot-output.txt
