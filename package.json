@@ -16,7 +16,8 @@
     "e2e": "tsx scripts/acceptance.ts",
     "worker": "tsx scripts/worker.ts",
     "print-agent": "node agent/print-agent.mjs",
-    "acceptance": "tsx scripts/acceptance.ts"
+    "acceptance": "tsx scripts/acceptance.ts",
+    "connect:whatsapp": "tsx scripts/connect-whatsapp.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",
