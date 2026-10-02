@@ -41,6 +41,7 @@
   "exclude": [
     "node_modules",
     ".data",
-    ".next"
+    ".next",
+    "evals/results"
   ]
 }

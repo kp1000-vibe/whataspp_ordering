@@ -9,7 +9,8 @@
  * looks first.
  */
 import { useCallback, useEffect, useState } from 'react';
-import { Card, Stat, Badge, Button, Empty, STATUS_TONE, money, clock, ago } from '../../../components/ui';
+import { Card, Stat, Badge, Button, Empty, STATUS_TONE, ago } from '../../../components/ui';
+import { useRestaurant } from '../../../components/restaurant';
 
 type Order = {
   id: string; orderNumber: number; status: string; channel: string;
@@ -41,11 +42,12 @@ const STATE_TONE: Record<string, string> = {
 };
 
 export default function DashboardPage() {
+  const { money, clock } = useRestaurant();
+  const [printed, setPrinted] = useState<string | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   const [capacity, setCapacity] = useState<Capacity | null>(null);
   const [slots, setSlots] = useState<Slot[]>([]);
   const [stats, setStats] = useState<any>(null);
-  const [currency, setCurrency] = useState('INR');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -58,7 +60,7 @@ export default function DashboardPage() {
       ]);
       if (o.orders) setOrders(o.orders);
       if (c.capacity) { setCapacity(c.capacity); setSlots(c.slots ?? []); }
-      if (a.stats) { setStats(a.stats); setCurrency(a.currency ?? 'INR'); }
+      if (a.stats) setStats(a.stats);
       setError('');
     } catch {
       setError('Could not reach the server. Retrying…');
@@ -96,6 +98,19 @@ export default function DashboardPage() {
         body: JSON.stringify({ action: 'delay', minutes, reason: 'Kitchen is running behind.' }),
       });
       await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reprint(orderId: string) {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/orders/${orderId}/reprint`, { method: 'POST' });
+      const data = await res.json();
+      setPrinted(res.ok ? orderId : null);
+      if (!res.ok) setError(data.error ?? 'Reprint failed.');
+      else setTimeout(() => setPrinted(null), 4000);
     } finally {
       setBusy(false);
     }
@@ -176,8 +191,9 @@ export default function DashboardPage() {
       {stats ? (
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
           <Stat label="Orders today" value={String(stats.ordersToday)} />
-          <Stat label="Revenue today" value={money(stats.revenueTodayCents, currency)} />
-          <Stat label="Average order" value={money(stats.averageOrderCents, currency)} />
+          <Stat label="Revenue today" value={money(stats.revenueTodayCents)} />
+          <Stat label="Average order" value={stats.averageOrderCents ? money(stats.averageOrderCents) : '—'}
+            hint={stats.averageOrderCents ? undefined : 'shown once an order is picked up'} />
           <Stat label="In the kitchen" value={String(stats.activeOrders)} tone={stats.activeOrders > 8 ? 'warn' : 'default'} />
           <Stat label="AI handled" value={`${Math.round(stats.aiContainmentRate * 100)}%`} tone="ok"
             hint={`${stats.staffInteractionsAvoided} interactions avoided`} />
@@ -209,7 +225,7 @@ export default function DashboardPage() {
                       </div>
                       <div className="text-right">
                         <Badge tone={STATUS_TONE[order.status] ?? 'neutral'}>{order.status.toLowerCase()}</Badge>
-                        <div className="mt-1 text-sm font-semibold tabular-nums">{money(order.totalCents, currency)}</div>
+                        <div className="mt-1 text-sm font-semibold tabular-nums">{money(order.totalCents)}</div>
                       </div>
                     </div>
 
@@ -245,6 +261,13 @@ export default function DashboardPage() {
                         </button>
                       ) : null}
                     </div>
+
+                    {['ACCEPTED', 'PREPARING', 'READY'].includes(order.status) ? (
+                      <div className="mt-2 flex items-center gap-2 text-xs">
+                        <Button variant="ghost" size="sm" disabled={busy} onClick={() => reprint(order.id)}>Reprint KOT</Button>
+                        {printed === order.id ? <span style={{ color: 'var(--ok)' }}>Sent to printer</span> : null}
+                      </div>
+                    ) : null}
 
                     {column.next ? (
                       <div className="mt-2 flex gap-2">

@@ -1,0 +1,554 @@
+{
+  "suite": "business",
+  "ranAt": "2026-09-24T07:17:12.829Z",
+  "total": 27,
+  "passed": 9,
+  "failed": 18,
+  "results": [
+    {
+      "suite": "business",
+      "id": "B01",
+      "title": "2 AM, scheduled orders ON → pickup offered only within opening hours",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "tells the customer we are closed right now",
+          "expected": "/closed|open/i",
+          "actual": "Here's your order:\n• 2 x Coke — ₹120.00\n• 1 x Garlic Naan — ₹70.00\n\nSubtotal: ₹190.00\nTax: ₹9.50\nTotal: ₹199.50\n\nthe earliest pickup for this order is 2:30 AM.\nShall I confirm?"
+        },
+        {
+          "ok": false,
+          "label": "promised pickup is inside 11:00–23:00",
+          "actual": "2:45 AM"
+        },
+        {
+          "ok": false,
+          "label": "no quoted time outside opening hours (2:30 AM)"
+        }
+      ],
+      "ms": 1996
+    },
+    {
+      "suite": "business",
+      "id": "B02",
+      "title": "2 AM, scheduled orders OFF → refuses and says when we open",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "no priceable order was created",
+          "expected": 0,
+          "actual": 0
+        },
+        {
+          "ok": true,
+          "label": "reply contains /closed/i",
+          "expected": "/closed/i",
+          "actual": "We're currently closed. We open today at 11:00 AM. We're open tomorrow from 11:00 AM to 11:00 PM."
+        },
+        {
+          "ok": true,
+          "label": "reply contains 11:00 AM",
+          "expected": "11:00 AM",
+          "actual": "We're currently closed. We open today at 11:00 AM. We're open tomorrow from 11:00 AM to 11:00 PM."
+        }
+      ],
+      "ms": 2362
+    },
+    {
+      "suite": "business",
+      "id": "B03",
+      "title": "closed on Monday → says so and names the next opening",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "no priceable order was created",
+          "expected": 0,
+          "actual": 0
+        },
+        {
+          "ok": true,
+          "label": "reply contains /closed on Monday/i",
+          "expected": "/closed on Monday/i",
+          "actual": "We're closed on Monday. We're open tomorrow from 11:00 AM to 11:00 PM."
+        },
+        {
+          "ok": true,
+          "label": "reply contains /tomorrow|Tuesday/i",
+          "expected": "/tomorrow|Tuesday/i",
+          "actual": "We're closed on Monday. We're open tomorrow from 11:00 AM to 11:00 PM."
+        }
+      ],
+      "ms": 2298
+    },
+    {
+      "suite": "business",
+      "id": "B04",
+      "title": "10:50 PM (close 11 PM) → never promises a pickup after closing",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "pickup not after 11 PM",
+          "expected": "<= 1380",
+          "actual": 15
+        }
+      ],
+      "ms": 2186
+    },
+    {
+      "suite": "business",
+      "id": "B05",
+      "title": "holiday closure → uses the holiday note",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "no priceable order was created",
+          "expected": 0,
+          "actual": 0
+        },
+        {
+          "ok": true,
+          "label": "reply contains Diwali",
+          "expected": "Diwali",
+          "actual": "Closed today for Diwali. We're open tomorrow from 11:00 AM to 11:00 PM."
+        }
+      ],
+      "ms": 2260
+    },
+    {
+      "suite": "business",
+      "id": "B06",
+      "title": "\"how long?\" honours +30 min padding (same promise as the slot engine)",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "quoted wait is at least the padded prep time",
+          "expected": ">= 50",
+          "actual": 0
+        }
+      ],
+      "ms": 2065
+    },
+    {
+      "suite": "business",
+      "id": "B07",
+      "title": "kitchen pauses after the draft → \"yes\" does not place the order",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "not confirmed",
+          "expected": "READY_FOR_CONFIRMATION",
+          "actual": "READY_FOR_CONFIRMATION"
+        },
+        {
+          "ok": true,
+          "label": "reply contains /Paused/",
+          "expected": "/Paused/",
+          "actual": "Paused for 10 minutes."
+        }
+      ],
+      "ms": 2114
+    },
+    {
+      "suite": "business",
+      "id": "B08",
+      "title": "item sells out after the draft → \"yes\" does not confirm it",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "not confirmed with a sold-out item",
+          "actual": "RECEIVED"
+        },
+        {
+          "ok": false,
+          "label": "reply contains /Garlic Naan/",
+          "expected": "/Garlic Naan/",
+          "actual": "Confirmed! Your order #1037 will be ready around 7:45 PM. We'll message you when it's ready."
+        },
+        {
+          "ok": false,
+          "label": "reply contains /sold out|unavailable/i",
+          "expected": "/sold out|unavailable/i",
+          "actual": "Confirmed! Your order #1037 will be ready around 7:45 PM. We'll message you when it's ready."
+        }
+      ],
+      "ms": 2077
+    },
+    {
+      "suite": "business",
+      "id": "B09",
+      "title": "price changes after the draft → customer sees the new total before it is placed",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "not placed at a price the customer never saw",
+          "actual": "RECEIVED"
+        },
+        {
+          "ok": false,
+          "label": "shows the new total (2×90 + 70 = 250, +5%)",
+          "expected": "₹262.50",
+          "actual": "Confirmed! Your order #1037 will be ready around 7:45 PM. We'll message you when it's ready."
+        }
+      ],
+      "ms": 2102
+    },
+    {
+      "suite": "business",
+      "id": "B10",
+      "title": "slot fills after the draft → not booked into the full slot; customer told",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "slot never exceeds its 8-order ceiling",
+          "expected": "<= 8",
+          "actual": 9
+        },
+        {
+          "ok": true,
+          "label": "customer told a different time",
+          "actual": "Confirmed! Your order #1037 will be ready around 7:45 PM. We'll message you when it's ready."
+        }
+      ],
+      "ms": 2159
+    },
+    {
+      "suite": "business",
+      "id": "B11",
+      "title": "3 customers confirm at once into the last seat of a slot → no overbooking",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "at most 8 orders in the slot",
+          "expected": "<= 8",
+          "actual": 10
+        }
+      ],
+      "ms": 2445
+    },
+    {
+      "suite": "business",
+      "id": "B12",
+      "title": "5 new customers order at the same instant → every one gets an order and a reply",
+      "pass": false,
+      "checks": [
+        {
+          "ok": true,
+          "label": "five drafts",
+          "expected": 5,
+          "actual": 5
+        },
+        {
+          "ok": false,
+          "label": "five replies",
+          "expected": 5,
+          "actual": 1
+        },
+        {
+          "ok": true,
+          "label": "order numbers are unique",
+          "expected": 5,
+          "actual": 5
+        }
+      ],
+      "ms": 2259
+    },
+    {
+      "suite": "business",
+      "id": "B13",
+      "title": "requested time beyond the booking horizon → says so (not \"full\")",
+      "pass": false,
+      "checks": [
+        {
+          "ok": true,
+          "label": "reply does not contain /is full/i",
+          "expected": "not /is full/i",
+          "actual": "I couldn't find \"I'll pick it up at 9 pm\" on our menu.\n\nHere's your order:\n• 2 x Coke — ₹120.00\n• 1 x Garlic Naan — ₹70.00\n\nSubtotal: ₹190.00\nTax: ₹9.50\nTotal: ₹199.50\n\nPickup at 2:00 PM works.\nShall I confirm?"
+        },
+        {
+          "ok": false,
+          "label": "reply contains /advance|ahead|too far|later today/i",
+          "expected": "/advance|ahead|too far|later today/i",
+          "actual": "I couldn't find \"I'll pick it up at 9 pm\" on our menu.\n\nHere's your order:\n• 2 x Coke — ₹120.00\n• 1 x Garlic Naan — ₹70.00\n\nSubtotal: ₹190.00\nTax: ₹9.50\nTotal: ₹199.50\n\nPickup at 2:00 PM works.\nShall I confirm?"
+        }
+      ],
+      "ms": 2032
+    },
+    {
+      "suite": "business",
+      "id": "B14",
+      "title": "requested time after closing → says we are closed by then; offers a time before close",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "reply contains /clos/i",
+          "expected": "/clos/i",
+          "actual": "I couldn't find \"pick up at 11:30 pm\" on our menu. That time is full. The next available pickup is 10:00 PM. Would you like that?\n\nHere's your order:\n• 2 x Coke — ₹120.00\n• 1 x Garlic Naan — ₹70.00\n\nSubtotal: ₹190.00\nTax: ₹9.50\nTotal: ₹199.50\n\nThat time is full. The next available pickup is 10:00 PM. Would you like that?"
+        },
+        {
+          "ok": false,
+          "label": "reply does not contain /is full/i",
+          "expected": "not /is full/i",
+          "actual": "I couldn't find \"pick up at 11:30 pm\" on our menu. That time is full. The next available pickup is 10:00 PM. Would you like that?\n\nHere's your order:\n• 2 x Coke — ₹120.00\n• 1 x Garlic Naan — ₹70.00\n\nSubtotal: ₹190.00\nTax: ₹9.50\nTotal: ₹199.50\n\nThat time is full. The next available pickup is 10:00 PM. Would you like that?"
+        },
+        {
+          "ok": true,
+          "label": "offered 10:00 PM is before closing",
+          "expected": "<= 1380",
+          "actual": 1320
+        },
+        {
+          "ok": true,
+          "label": "offered 10:00 PM is before closing",
+          "expected": "<= 1380",
+          "actual": 1320
+        }
+      ],
+      "ms": 2025
+    },
+    {
+      "suite": "business",
+      "id": "B15",
+      "title": "requested \"in 5 minutes\" → too soon, offers the earliest real time",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "reply contains /soon/i",
+          "expected": "/soon/i",
+          "actual": "I couldn't find \"pick up in 5 minutes\" on our menu. That time is full. The next available pickup is 7:30 PM. Would you like that?\n\nHere's your order:\n• 2 x Coke — ₹120.00\n• 1 x Garlic Naan — ₹70.00\n\nSubtotal: ₹190.00\nTax: ₹9.50\nTotal: ₹199.50\n\nThat time is full. The next available pickup is 7:30 PM. Would you like that?"
+        },
+        {
+          "ok": true,
+          "label": "offers a time",
+          "actual": "I couldn't find \"pick up in 5 minutes\" on our menu. That time is full. The next available pickup is 7:30 PM. Would you like that?\n\nHere's your order:\n• 2 x Coke — ₹120.00\n• 1 x Garlic Naan — ₹70.00\n\nSubtotal: ₹190.00\nTax: ₹9.50\nTotal: ₹199.50\n\nThat time is full. The next available pickup is 7:30 PM. Would you like that?"
+        }
+      ],
+      "ms": 1998
+    },
+    {
+      "suite": "business",
+      "id": "B16",
+      "title": "abandoned drafts expire",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "DRAFT → EXPIRED allowed"
+        },
+        {
+          "ok": false,
+          "label": "READY_FOR_CONFIRMATION → EXPIRED allowed"
+        }
+      ],
+      "error": "Error: expireStaleDrafts is not implemented in ../src/server/orders/service\n    at need (C:\\Users\\Aradhana Panigraphy\\Small Business AI\\evals\\business.eval.ts:33:46)\n    at async Object.fn (C:\\Users\\Aradhana Panigraphy\\Small Business AI\\evals\\business.eval.ts:242:18)\n    at async Suite.run (C:\\Users\\Aradhana Panigraphy\\Small Business AI\\evals\\harness.ts:82:9)",
+      "ms": 2099
+    },
+    {
+      "suite": "business",
+      "id": "B17",
+      "title": "staff edit re-prices from the menu and is audited",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "re-priced from the menu",
+          "expected": 18000,
+          "actual": 18000
+        },
+        {
+          "ok": true,
+          "label": "audited",
+          "expected": ">= 1",
+          "actual": 1
+        }
+      ],
+      "ms": 2532
+    },
+    {
+      "suite": "business",
+      "id": "B18",
+      "title": "reprint creates a fresh KOT job",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "reprint job queued",
+          "expected": ">= 1",
+          "actual": 1
+        },
+        {
+          "ok": true,
+          "label": "original + reprint",
+          "expected": ">= 2",
+          "actual": 2
+        }
+      ],
+      "ms": 2460
+    },
+    {
+      "suite": "business",
+      "id": "B19",
+      "title": "print failing 3 times → job FAILED and visible, never silently lost",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "job marked FAILED",
+          "expected": "FAILED",
+          "actual": "FAILED"
+        },
+        {
+          "ok": true,
+          "label": "error kept",
+          "expected": "paper jam",
+          "actual": "paper jam"
+        }
+      ],
+      "ms": 2380
+    },
+    {
+      "suite": "business",
+      "id": "B20",
+      "title": "erasure removes the phone number and name from EVERY table",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "no column still holds the phone or name",
+          "expected": [],
+          "actual": [
+            "domain_events.payload",
+            "print_jobs.payload"
+          ]
+        }
+      ],
+      "ms": 2117
+    },
+    {
+      "suite": "business",
+      "id": "B21",
+      "title": "an escalated chat is not counted as \"handled by AI\"",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "escalation counts as a handoff",
+          "expected": ">= 0.01",
+          "actual": 0
+        },
+        {
+          "ok": false,
+          "label": "containment is not 100% when a chat was escalated",
+          "actual": 1
+        }
+      ],
+      "ms": 2806
+    },
+    {
+      "suite": "business",
+      "id": "B22",
+      "title": "outbound WhatsApp messages are metered (they are what Meta bills)",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "outbound messages counted",
+          "expected": ">= 2",
+          "actual": 0
+        }
+      ],
+      "ms": 2715
+    },
+    {
+      "suite": "business",
+      "id": "B23",
+      "title": "\"Orders today\" counts confirmed orders still in the kitchen",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "a RECEIVED order counts today",
+          "expected": 2,
+          "actual": 1
+        }
+      ],
+      "ms": 2525
+    },
+    {
+      "suite": "business",
+      "id": "B24",
+      "title": "sign-in works for the 600th user (no hidden row cap)",
+      "pass": false,
+      "checks": [],
+      "error": "AuthError: Invalid email or password.\n    at signIn (C:\\Users\\Aradhana Panigraphy\\Small Business AI\\src\\server\\auth\\service.ts:105:27)\n    at async Object.fn (C:\\Users\\Aradhana Panigraphy\\Small Business AI\\evals\\business.eval.ts:349:20)\n    at async Suite.run (C:\\Users\\Aradhana Panigraphy\\Small Business AI\\evals\\harness.ts:82:9)",
+      "ms": 2446
+    },
+    {
+      "suite": "business",
+      "id": "B25",
+      "title": "duplicate email is refused cleanly even with 600 users",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "clear duplicate-account error, not a database crash",
+          "expected": "/already exists/i",
+          "actual": "Failed query: insert into \"users\" (\"id\", \"email\", \"password_hash\", \"name\", \"is_platform_admin\", \"created_at\", \"updated_at\") values ($1, $2, $3, $4, default, default, default)\nparams: usr_M2azD9sn7KJaUmnU,bulk599@example.com,scrypt$16384$8$1$B+ga3Do6gY8ev4afAvcWOQ==$GRNnlHAZCoXLVIKT59q980pgEi8T7I3N5LAt44+Obtfh0fKWbgPZFOmWTj4UDQm3x7048ahlH+ZWRjOwduJxbQ==,x"
+        }
+      ],
+      "ms": 2247
+    },
+    {
+      "suite": "business",
+      "id": "B26",
+      "title": "first-order-only promotion applies to a new customer and not a returning one",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "new customer gets 20% of 190",
+          "expected": 3800,
+          "actual": 3800
+        },
+        {
+          "ok": true,
+          "label": "returning customer does not",
+          "expected": 0,
+          "actual": 0
+        }
+      ],
+      "ms": 2317
+    },
+    {
+      "suite": "business",
+      "id": "B27",
+      "title": "tenant B cannot change tenant A's item availability; A's own toggle still works",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "foreign location/item is refused"
+        },
+        {
+          "ok": false,
+          "label": "A's own sold-out toggle takes effect",
+          "expected": "SOLD_OUT",
+          "actual": "AVAILABLE"
+        }
+      ],
+      "ms": 2282
+    }
+  ]
+}

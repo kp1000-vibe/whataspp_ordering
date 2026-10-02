@@ -8,6 +8,7 @@
  */
 import { getDb } from '../../db/client';
 import type { TenantScope } from '../tenancy';
+import { now as clockNow } from '../../lib/clock';
 
 export type DashboardStats = {
   ordersToday: number;
@@ -31,18 +32,25 @@ export async function dashboardStats(scope: TenantScope, timezone: string): Prom
   const db = await getDb();
   const r = scope.restaurantId;
 
+  /**
+   * "Orders today" = orders customers confirmed today that were not cancelled —
+   * including the ones still in the kitchen. Revenue counts only orders handed
+   * over, because pay-at-pickup money is not real until pickup (eval B23).
+   */
   const { rows: today } = await db.execute(
     `SELECT
-       count(*) FILTER (WHERE status IN ('PICKED_UP','COMPLETED'))::int AS orders_today,
+       count(*) FILTER (WHERE confirmed_at IS NOT NULL AND status NOT IN ('CANCELLED','REJECTED','EXPIRED'))::int AS orders_today,
+       count(*) FILTER (WHERE status IN ('PICKED_UP','COMPLETED'))::int AS completed_today,
        COALESCE(sum(total_cents) FILTER (WHERE status IN ('PICKED_UP','COMPLETED')),0)::int AS revenue_today,
        count(*) FILTER (WHERE status IN ('CANCELLED','REJECTED'))::int AS cancelled_today,
        count(*) FILTER (WHERE status IN ('RECEIVED','ACCEPTED','PREPARING'))::int AS active_orders,
        count(*) FILTER (WHERE status = 'READY')::int AS ready_orders,
-       count(*) FILTER (WHERE channel = 'WHATSAPP_VOICE' AND status IN ('PICKED_UP','COMPLETED'))::int AS voice_orders
+       count(*) FILTER (WHERE channel = 'WHATSAPP_VOICE' AND confirmed_at IS NOT NULL
+                         AND status NOT IN ('CANCELLED','REJECTED','EXPIRED'))::int AS voice_orders
      FROM orders
      WHERE restaurant_id = $1
-       AND (created_at AT TIME ZONE $2)::date = (now() AT TIME ZONE $2)::date;`,
-    [r, timezone],
+       AND (COALESCE(confirmed_at, created_at) AT TIME ZONE $2)::date = ($3::timestamptz AT TIME ZONE $2)::date;`,
+    [r, timezone, clockNow().toISOString()],
   );
   const t = today[0] ?? {};
 
@@ -67,22 +75,26 @@ export async function dashboardStats(scope: TenantScope, timezone: string): Prom
   );
   const c = customersRows[0] ?? {};
 
-  /* AI containment: conversations in the last 30 days with at least one AI reply
-     and zero staff messages. A handoff is the failure case we are measuring. */
+  /* AI containment: chats the assistant finished with NO human involvement.
+     A chat counts as handed off if staff wrote in it, staff currently hold it,
+     or the assistant escalated it — even if nobody has replied yet (eval B21). */
   const { rows: containment } = await db.execute(
     `WITH conv AS (
-       SELECT c.id,
-              count(*) FILTER (WHERE m.author_type = 'AI')::int   AS ai_msgs,
-              count(*) FILTER (WHERE m.author_type = 'STAFF')::int AS staff_msgs
+       SELECT c.id, c.handled_by,
+              count(m.id) FILTER (WHERE m.author_type = 'AI')::int    AS ai_msgs,
+              count(m.id) FILTER (WHERE m.author_type = 'STAFF')::int AS staff_msgs,
+              EXISTS (SELECT 1 FROM domain_events e
+                      WHERE e.restaurant_id = c.restaurant_id AND e.name = 'conversation.escalated'
+                        AND e.payload->>'conversationId' = c.id) AS escalated
        FROM conversations c
        LEFT JOIN conversation_messages m ON m.conversation_id = c.id
        WHERE c.restaurant_id = $1 AND c.created_at > now() - interval '30 days'
-       GROUP BY c.id
+       GROUP BY c.id, c.handled_by, c.restaurant_id
      )
      SELECT
        count(*)::int AS total,
-       count(*) FILTER (WHERE ai_msgs > 0 AND staff_msgs = 0)::int AS contained,
-       count(*) FILTER (WHERE staff_msgs > 0)::int AS handed_off
+       count(*) FILTER (WHERE ai_msgs > 0 AND staff_msgs = 0 AND handled_by = 'AI' AND NOT escalated)::int AS contained,
+       count(*) FILTER (WHERE staff_msgs > 0 OR handled_by = 'STAFF' OR escalated)::int AS handed_off
      FROM conv;`,
     [r],
   );
@@ -107,12 +119,13 @@ export async function dashboardStats(scope: TenantScope, timezone: string): Prom
   );
 
   const ordersToday = Number(t.orders_today ?? 0);
+  const completedToday = Number(t.completed_today ?? 0);
   const revenueToday = Number(t.revenue_today ?? 0);
 
   return {
     ordersToday,
     revenueTodayCents: revenueToday,
-    averageOrderCents: ordersToday ? Math.round(revenueToday / ordersToday) : 0,
+    averageOrderCents: completedToday ? Math.round(revenueToday / completedToday) : 0,
     activeOrders: Number(t.active_orders ?? 0),
     readyForPickup: Number(t.ready_orders ?? 0),
     cancelledToday: Number(t.cancelled_today ?? 0),

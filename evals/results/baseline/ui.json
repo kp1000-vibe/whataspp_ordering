@@ -1,0 +1,296 @@
+{
+  "suite": "ui",
+  "ranAt": "2026-09-24T07:23:09.227Z",
+  "total": 19,
+  "passed": 9,
+  "failed": 10,
+  "results": [
+    {
+      "suite": "ui",
+      "id": "U01",
+      "title": "login page: labelled fields; wrong password shows an error",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "email field has a label"
+        },
+        {
+          "ok": true,
+          "label": "password field has a label"
+        },
+        {
+          "ok": true,
+          "label": "error shown"
+        }
+      ],
+      "ms": 1797,
+      "screenshot": "evals/screenshots/U01-login-error.png"
+    },
+    {
+      "suite": "ui",
+      "id": "U02",
+      "title": "sign in → dashboard with kitchen status, pickup slots and stats",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "reply contains OPEN",
+          "expected": "OPEN",
+          "actual": "AI\nSpiceBox Biryani\nOrders\nKitchen\nMenu\nChats\nCustomers\nAnalytics\nTest order\nSettings\nSana Qureshi\nSign out\nKitchen status\nOPEN\nOpen\nBusy\nVery busy\n+15 min\n+30 min\nPause orders\nClose today\n7:15 PM\n0/8\n7:30 PM\n1/8\n7:45 PM\n0/8\n8:00 PM\n0/8\n8:15 PM\n0/8\n8:30 PM\n0/8\n8:45 PM\n0/8\n9:00 PM\n0/8\n9:15 PM\n0/8\n9:30 PM\n0/8\n9:45 PM\n0/8\n10:00 PM\n0/8\n10:15 PM\n0/8\n10:30 PM\n0/8\n10:45 PM\n0/8\n11:00 PM\n0/8\nORDERS TODAY\n1"
+        },
+        {
+          "ok": true,
+          "label": "pickup slots rendered",
+          "expected": "/\\d{1,2}:\\d{2} [AP]M/",
+          "actual": "AI\nSpiceBox Biryani\nOrders\nKitchen\nMenu\nChats\nCustomers\nAnalytics\nTest order\nSettings\nSana Qureshi\nSign out\nKitchen status\nOPEN\nOpen\nBusy\nVery busy\n+15 min\n+30 min\nPause orders\nClose today\n7:15 PM\n0/8\n7:30 PM\n1/8\n7:45 PM\n0/8\n8:00 PM\n0/8\n8:15 PM\n0/8\n8:30 PM\n0/8\n8:45 PM\n0/8\n9:00 PM\n0/8\n9:15 PM\n0/8\n9:30 PM\n0/8\n9:45 PM\n0/8\n10:00 PM\n0/8\n10:15 PM\n0/8\n10:30 PM\n0/8\n10:45 PM\n0/8\n11:00 PM\n0/8\nORDERS TODAY\n1"
+        },
+        {
+          "ok": true,
+          "label": "reply contains /AI HANDLED/i",
+          "expected": "/AI HANDLED/i",
+          "actual": "AI\nSpiceBox Biryani\nOrders\nKitchen\nMenu\nChats\nCustomers\nAnalytics\nTest order\nSettings\nSana Qureshi\nSign out\nKitchen status\nOPEN\nOpen\nBusy\nVery busy\n+15 min\n+30 min\nPause orders\nClose today\n7:15 PM\n0/8\n7:30 PM\n1/8\n7:45 PM\n0/8\n8:00 PM\n0/8\n8:15 PM\n0/8\n8:30 PM\n0/8\n8:45 PM\n0/8\n9:00 PM\n0/8\n9:15 PM\n0/8\n9:30 PM\n0/8\n9:45 PM\n0/8\n10:00 PM\n0/8\n10:15 PM\n0/8\n10:30 PM\n0/8\n10:45 PM\n0/8\n11:00 PM\n0/8\nORDERS TODAY\n1"
+        }
+      ],
+      "ms": 1147,
+      "screenshot": "evals/screenshots/U02-dashboard.png"
+    },
+    {
+      "suite": "ui",
+      "id": "U03",
+      "title": "simulator: spec §6 conversation end to end",
+      "pass": false,
+      "checks": [],
+      "error": "page.waitForFunction: Timeout 30000ms exceeded.\n    at simulatorSend (C:\\Users\\Aradhana Panigraphy\\Small Business AI\\evals\\ui.eval.ts:55:11)\n    at async Object.fn (C:\\Users\\Aradhana Panigraphy\\Small Business AI\\evals\\ui.eval.ts:99:3)\n    at async Suite.run (C:\\Users\\Aradhana Panigraphy\\Small Business AI\\evals\\harness.ts:82:9)",
+      "ms": 30674
+    },
+    {
+      "suite": "ui",
+      "id": "U04",
+      "title": "simulator: Hinglish voice note",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "reply contains Chicken Biryani (Spicy)",
+          "expected": "Chicken Biryani (Spicy)",
+          "actual": "AI\nSpiceBox Biryani\nOrders\nKitchen\nMenu\nChats\nCustomers\nAnalytics\nTest order\nSettings\nSana Qureshi\nSign out\nsimulated WhatsApp\n+919822200002\nsending as a voice note\nBhai do chicken biryani dena, ek spicy aur ek normal, aur ek coke\nHere's your order:\n• 1 x Chicken Biryani (Regular) — ₹240.00\n• 1 x Chicken Biryani (Spicy) — ₹240.00\n• 1 x Coke — ₹60.00\n\nSubtotal: ₹540.00\nDiscount: -₹54.00\nTax: ₹24.30"
+        },
+        {
+          "ok": true,
+          "label": "reply contains Chicken Biryani (Regular)",
+          "expected": "Chicken Biryani (Regular)",
+          "actual": "AI\nSpiceBox Biryani\nOrders\nKitchen\nMenu\nChats\nCustomers\nAnalytics\nTest order\nSettings\nSana Qureshi\nSign out\nsimulated WhatsApp\n+919822200002\nsending as a voice note\nBhai do chicken biryani dena, ek spicy aur ek normal, aur ek coke\nHere's your order:\n• 1 x Chicken Biryani (Regular) — ₹240.00\n• 1 x Chicken Biryani (Spicy) — ₹240.00\n• 1 x Coke — ₹60.00\n\nSubtotal: ₹540.00\nDiscount: -₹54.00\nTax: ₹24.30"
+        },
+        {
+          "ok": true,
+          "label": "reply contains 1 x Coke",
+          "expected": "1 x Coke",
+          "actual": "AI\nSpiceBox Biryani\nOrders\nKitchen\nMenu\nChats\nCustomers\nAnalytics\nTest order\nSettings\nSana Qureshi\nSign out\nsimulated WhatsApp\n+919822200002\nsending as a voice note\nBhai do chicken biryani dena, ek spicy aur ek normal, aur ek coke\nHere's your order:\n• 1 x Chicken Biryani (Regular) — ₹240.00\n• 1 x Chicken Biryani (Spicy) — ₹240.00\n• 1 x Coke — ₹60.00\n\nSubtotal: ₹540.00\nDiscount: -₹54.00\nTax: ₹24.30"
+        }
+      ],
+      "ms": 676,
+      "screenshot": "evals/screenshots/U04-simulator-hinglish-voice.png"
+    },
+    {
+      "suite": "ui",
+      "id": "U05",
+      "title": "dashboard: accept → start cooking moves the card across the board",
+      "pass": false,
+      "checks": [],
+      "error": "locator.waitFor: Timeout 20000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: 'Accept' }).first() to be visible\u001b[22m\n",
+      "ms": 20430
+    },
+    {
+      "suite": "ui",
+      "id": "U06",
+      "title": "kitchen display: big readable cards, soonest pickup first",
+      "pass": false,
+      "checks": [],
+      "error": "locator.waitFor: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByText('COOKING', { exact: true }) to be visible\u001b[22m\n",
+      "ms": 30640
+    },
+    {
+      "suite": "ui",
+      "id": "U19",
+      "title": "dashboard: reprint the KOT from an order card",
+      "pass": false,
+      "checks": [],
+      "error": "locator.waitFor: Timeout 20000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: 'Reprint KOT' }).first() to be visible\u001b[22m\n",
+      "ms": 20311
+    },
+    {
+      "suite": "ui",
+      "id": "U07",
+      "title": "pause orders: badge turns PAUSED and the assistant refuses new orders",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "assistant refuses while paused",
+          "expected": "/paused/i",
+          "actual": "We have paused new orders for a few minutes while the kitchen catches up."
+        }
+      ],
+      "ms": 1187,
+      "screenshot": "evals/screenshots/U07-paused.png"
+    },
+    {
+      "suite": "ui",
+      "id": "U08",
+      "title": "menu: one tap marks an item sold out",
+      "pass": false,
+      "checks": [],
+      "error": "locator.waitFor: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('div.flex.items-center.gap-3.p-3').filter({ hasText: 'Garlic Naan' }).getByText('sold out', { exact: true }) to be visible\u001b[22m\n",
+      "ms": 30746
+    },
+    {
+      "suite": "ui",
+      "id": "U09",
+      "title": "menu: add a new item from the console",
+      "pass": false,
+      "checks": [],
+      "error": "locator.fill: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByLabel('Category')\u001b[22m\n",
+      "ms": 30196
+    },
+    {
+      "suite": "ui",
+      "id": "U10",
+      "title": "menu: CSV import shows line-numbered errors and publishes nothing",
+      "pass": false,
+      "checks": [],
+      "error": "locator.fill: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByLabel('CSV')\u001b[22m\n",
+      "ms": 30245
+    },
+    {
+      "suite": "ui",
+      "id": "U11",
+      "title": "chats: take over, reply as staff, hand back",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "staff mode shown"
+        }
+      ],
+      "ms": 1406,
+      "screenshot": "evals/screenshots/U11-chats-takeover.png"
+    },
+    {
+      "suite": "ui",
+      "id": "U12",
+      "title": "customers: search by name",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "exactly one match",
+          "expected": 1,
+          "actual": 1
+        }
+      ],
+      "ms": 929,
+      "screenshot": "evals/screenshots/U12-customers-search.png"
+    },
+    {
+      "suite": "ui",
+      "id": "U13",
+      "title": "analytics: containment, peak hours, top items, usage",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "reply contains Busiest hours",
+          "expected": "Busiest hours",
+          "actual": "AI\nSpiceBox Biryani\nOrders\nKitchen\nMenu\nChats\nCustomers\nAnalytics\nTest order\nSettings\nSana Qureshi\nSign out\nHow much work the assistant absorbed\nAI CONTAINMENT\n83%\nchats finished with no staff involvement\nHANDED TO A PERSON\n17%\nINTERACTIONS AVOIDED\n7\nmessages staff did not have to answer\nNEEDED CLARIFYING\n0%\nService\nORDERS TODAY\n1\nREVENUE TODAY\n₹640.50\nAVERAGE PREP\n0 min\nPICKUP DELAY\n0 min\nhow far"
+        },
+        {
+          "ok": true,
+          "label": "reply contains Top items",
+          "expected": "Top items",
+          "actual": "AI\nSpiceBox Biryani\nOrders\nKitchen\nMenu\nChats\nCustomers\nAnalytics\nTest order\nSettings\nSana Qureshi\nSign out\nHow much work the assistant absorbed\nAI CONTAINMENT\n83%\nchats finished with no staff involvement\nHANDED TO A PERSON\n17%\nINTERACTIONS AVOIDED\n7\nmessages staff did not have to answer\nNEEDED CLARIFYING\n0%\nService\nORDERS TODAY\n1\nREVENUE TODAY\n₹640.50\nAVERAGE PREP\n0 min\nPICKUP DELAY\n0 min\nhow far"
+        },
+        {
+          "ok": true,
+          "label": "reply contains Chicken Biryani",
+          "expected": "Chicken Biryani",
+          "actual": "AI\nSpiceBox Biryani\nOrders\nKitchen\nMenu\nChats\nCustomers\nAnalytics\nTest order\nSettings\nSana Qureshi\nSign out\nHow much work the assistant absorbed\nAI CONTAINMENT\n83%\nchats finished with no staff involvement\nHANDED TO A PERSON\n17%\nINTERACTIONS AVOIDED\n7\nmessages staff did not have to answer\nNEEDED CLARIFYING\n0%\nService\nORDERS TODAY\n1\nREVENUE TODAY\n₹640.50\nAVERAGE PREP\n0 min\nPICKUP DELAY\n0 min\nhow far"
+        }
+      ],
+      "ms": 842,
+      "screenshot": "evals/screenshots/U13-analytics.png"
+    },
+    {
+      "suite": "ui",
+      "id": "U14",
+      "title": "settings: edit hours and capacity, and they persist",
+      "pass": false,
+      "checks": [],
+      "error": "locator.fill: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByLabel('Tuesday closes')\u001b[22m\n",
+      "ms": 30752
+    },
+    {
+      "suite": "ui",
+      "id": "U15",
+      "title": "a US restaurant sees dollars and its own local time",
+      "pass": false,
+      "checks": [],
+      "error": "locator.waitFor: Timeout 20000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByText('Classic Burger') to be visible\u001b[22m\n",
+      "ms": 21270
+    },
+    {
+      "suite": "ui",
+      "id": "U16",
+      "title": "a hostile customer name is shown as text, never executed",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "script did not run",
+          "expected": null,
+          "actual": null
+        },
+        {
+          "ok": true,
+          "label": "no alert dialog",
+          "expected": 0,
+          "actual": 0
+        }
+      ],
+      "ms": 734,
+      "screenshot": "evals/screenshots/U16-xss-name-rendered-as-text.png"
+    },
+    {
+      "suite": "ui",
+      "id": "U17",
+      "title": "mobile: dashboard and kitchen fit a 390px phone",
+      "pass": false,
+      "checks": [
+        {
+          "ok": true,
+          "label": "no horizontal scroll on dashboard",
+          "expected": "<= 0",
+          "actual": 0
+        }
+      ],
+      "error": "locator.waitFor: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByText('COOKING', { exact: true }) to be visible\u001b[22m\n",
+      "ms": 31486,
+      "screenshot": "evals/screenshots/U17a-mobile-dashboard.png"
+    },
+    {
+      "suite": "ui",
+      "id": "U18",
+      "title": "accessibility basics: every dashboard button has a name",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "buttons without an accessible name",
+          "expected": 0,
+          "actual": 0
+        }
+      ],
+      "ms": 285
+    }
+  ]
+}

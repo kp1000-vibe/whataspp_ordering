@@ -97,60 +97,91 @@ export async function getItem(scope: TenantScope, locationId: string, itemId: st
 
 /* ───────────────────────── search ───────────────────────── */
 
+/** Words that never identify a dish. */
 const STOPWORDS = new Set([
-  'a', 'an', 'the', 'and', 'or', 'of', 'with', 'i', 'want', 'get', 'me', 'please',
-  'some', 'one', 'two', 'three', 'order', 'would', 'like', 'can', 'could', 'have',
+  'a', 'an', 'the', 'and', 'or', 'of', 'i', 'want', 'get', 'me', 'please', 'some', 'order',
+  'would', 'like', 'can', 'could', 'have', 'do', 'you', 'is', 'are', 'my', 'for', 'to', 'it',
+]);
+
+/**
+ * Words that describe how a dish is made, not which dish it is. They are
+ * ignored when judging precision, so "chicken biryani spicy" is still an exact
+ * match for Chicken Biryani — while "mango lassi" is NOT an exact match for
+ * Sweet Lassi, because "mango" is an identifying word that dish doesn't have.
+ */
+const NON_IDENTIFYING = new Set([
+  'spicy', 'regular', 'mild', 'hot', 'normal', 'medium', 'plain', 'extra', 'very', 'double', 'less',
+  'more', 'large', 'small', 'big', 'cold', 'chilled', 'fresh', 'both', 'all', 'one', 'portion',
+  'plate', 'plates', 'full', 'half', 'piece', 'pieces', 'pcs', 'nos',
 ]);
 
 export function normalise(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  return s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
 }
 
 function tokens(s: string): string[] {
   return normalise(s).split(' ').filter((t) => t && !STOPWORDS.has(t));
 }
 
-/** Singular/plural-tolerant token equality. */
-function tokenMatch(a: string, b: string): boolean {
-  if (a === b) return true;
-  if (a.length > 3 && b === `${a}s`) return true;
-  if (b.length > 3 && a === `${b}s`) return true;
-  if (a.length > 4 && b.length > 4 && (a.startsWith(b) || b.startsWith(a))) return true;
-  return false;
+/** Optimal-string-alignment distance (Damerau-Levenshtein with adjacent transpositions). */
+function editDistance(a: string, b: string): number {
+  const d: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [i, ...new Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+  }
+  return d[a.length][b.length];
+}
+
+/**
+ * 1 = same word (incl. plural), 0.85 = a plausible typo, 0 = different.
+ * Typos are only accepted for words of 5+ letters that share the first letter,
+ * so "cake" can never quietly become "coke".
+ */
+function tokenCredit(q: string, c: string): number {
+  if (q === c) return 1;
+  if (c.length > 2 && (q === `${c}s` || q === `${c}es`)) return 1;
+  if (q.length > 2 && (c === `${q}s` || c === `${q}es`)) return 1;
+  if (q.length >= 5 && c.length >= 4 && q[0] === c[0]) {
+    const allowed = Math.max(q.length, c.length) >= 8 ? 2 : 1;
+    if (editDistance(q, c) <= allowed) return 0.85;
+  }
+  return 0;
 }
 
 export type MenuMatch = { item: ResolvedItem; score: number };
 
 /**
- * Deterministic lexical match over name + aliases + description.
- * Score is in [0,1] and is what drives the clarification threshold —
- * the LLM does not get to declare its own confidence about item identity.
+ * Deterministic match score in [0,1] = coverage × precision.
+ *   coverage  — how much of the dish's name the customer said
+ *   precision — how much of what the customer said belongs to this dish
+ * The score, not the language model, decides whether we ask a clarifying
+ * question. Anything below the agent's threshold becomes "did you mean …?".
  */
 export function scoreItem(query: string, item: ResolvedItem): number {
-  const q = tokens(query);
+  const q = tokens(query).filter((t) => !NON_IDENTIFYING.has(t));
   if (q.length === 0) return 0;
+  const descTokens = tokens(item.description);
 
-  const candidates = [item.name, ...item.aliases];
   let best = 0;
-
-  for (const cand of candidates) {
+  for (const cand of [item.name, ...item.aliases]) {
     const c = tokens(cand);
     if (c.length === 0) continue;
-    if (normalise(cand) === normalise(query)) return 1;
+    if (normalise(cand) === normalise(q.join(' '))) return 1;
 
-    let hits = 0;
-    for (const ct of c) if (q.some((qt) => tokenMatch(qt, ct))) hits++;
-    // coverage of the candidate name, lightly penalised by unmatched query noise
-    const coverage = hits / c.length;
-    const precision = hits / q.length;
-    best = Math.max(best, coverage * 0.75 + precision * 0.25);
-  }
+    const coverage = c.reduce((sum, ct) => sum + Math.max(0, ...q.map((qt) => tokenCredit(qt, ct))), 0) / c.length;
+    const precision = q.reduce((sum, qt) => {
+      const inName = Math.max(0, ...c.map((ct) => tokenCredit(qt, ct)));
+      if (inName > 0) return sum + inName;
+      // A word from the dish's own description is weak evidence, not none.
+      return sum + (descTokens.some((dt) => tokenCredit(qt, dt) === 1) ? 0.5 : 0);
+    }, 0) / q.length;
 
-  if (best < 0.4) {
-    const d = tokens(item.description);
-    let hits = 0;
-    for (const qt of q) if (d.some((dt) => tokenMatch(qt, dt))) hits++;
-    if (hits) best = Math.max(best, (hits / q.length) * 0.35);
+    best = Math.max(best, coverage * precision);
   }
   return Math.min(1, best);
 }
@@ -161,7 +192,7 @@ export async function searchMenu(
   const menu = await getMenu(scope, locationId);
   return menu
     .map((item) => ({ item, score: scoreItem(query, item) }))
-    .filter((m) => m.score > 0.25)
+    .filter((m) => m.score > 0.2)
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
 }
@@ -172,9 +203,14 @@ export function matchModifier(group: ResolvedModifierGroup, phrase: string): Res
     if (normalise(m.name) === p) return m;
     if (m.aliases.some((a) => normalise(a) === p)) return m;
   }
-  for (const m of group.modifiers) {
-    const t = tokens(m.name);
-    if (t.length && t.every((mt) => tokens(phrase).some((pt) => tokenMatch(pt, mt)))) return m;
+  // Longest first, so "extra spicy" wins over "spicy".
+  const byLength = [...group.modifiers].sort((a, b) => b.name.length - a.name.length);
+  const pt = p.split(' ');
+  for (const m of byLength) {
+    for (const name of [m.name, ...m.aliases]) {
+      const mt = normalise(name).split(' ').filter(Boolean);
+      if (mt.length && mt.every((t) => pt.some((x) => tokenCredit(x, t) === 1))) return m;
+    }
   }
   return null;
 }
@@ -199,10 +235,29 @@ export async function setAvailability(
 ): Promise<void> {
   const db = await getDb();
   const { newId } = await import('../../lib/ids');
+  const { NotFoundError } = await import('../errors');
+  const { locations } = await import('../../db/schema');
+
+  // Every id must belong to THIS restaurant. Without these checks another
+  // tenant could overwrite our sold-out flag (evals B27 / HT03).
+  const [loc] = await db.drizzle.select().from(locations)
+    .where(and(eq(locations.restaurantId, scope.restaurantId), eq(locations.id, locationId))).limit(1);
+  if (!loc) throw new NotFoundError('Location not found.');
+  if (target.menuItemId) {
+    const [it] = await db.drizzle.select().from(menuItems)
+      .where(and(eq(menuItems.restaurantId, scope.restaurantId), eq(menuItems.id, target.menuItemId))).limit(1);
+    if (!it) throw new NotFoundError('Menu item not found.');
+  } else if (target.modifierId) {
+    const [md] = await db.drizzle.select().from(modifiers)
+      .where(and(eq(modifiers.restaurantId, scope.restaurantId), eq(modifiers.id, target.modifierId))).limit(1);
+    if (!md) throw new NotFoundError('Option not found.');
+  } else {
+    throw new NotFoundError('Nothing to update.');
+  }
 
   const where = target.menuItemId
-    ? and(eq(inventoryStatus.locationId, locationId), eq(inventoryStatus.menuItemId, target.menuItemId))
-    : and(eq(inventoryStatus.locationId, locationId), eq(inventoryStatus.modifierId, target.modifierId!));
+    ? and(eq(inventoryStatus.restaurantId, scope.restaurantId), eq(inventoryStatus.locationId, locationId), eq(inventoryStatus.menuItemId, target.menuItemId))
+    : and(eq(inventoryStatus.restaurantId, scope.restaurantId), eq(inventoryStatus.locationId, locationId), eq(inventoryStatus.modifierId, target.modifierId!));
 
   const existing = await db.drizzle.select().from(inventoryStatus).where(where).limit(1);
   if (existing.length) {

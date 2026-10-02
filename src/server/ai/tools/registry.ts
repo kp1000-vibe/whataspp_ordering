@@ -79,13 +79,29 @@ export function makeTools(ctx: ToolContext) {
       const db = await getDb();
       const rows = await db.drizzle.select().from(faqEntries)
         .where(eq(faqEntries.restaurantId, ctx.scope.restaurantId));
-      const q = query.toLowerCase();
+      /**
+       * Whole-word matching on MEANINGFUL words only. The old version matched any
+       * shared 4-letter substring, so "do you have pizza?" returned the parking
+       * answer because both contain "have" (eval Q13).
+       */
+      const FAQ_STOP = new Set(['have', 'your', 'what', 'does', 'with', 'there', 'when', 'where', 'this',
+        'that', 'from', 'about', 'they', 'will', 'would', 'could', 'should', 'which', 'some', 'any', 'you']);
+      const words = (s: string) => new Set(s.toLowerCase().split(/[^\p{L}\p{N}]+/u)
+        .filter((w) => w.length > 3 && !FAQ_STOP.has(w)));
+      const qWords = words(query);
+      const stem = (w: string) => w.replace(/(ing|ed|es|s)$/, '');
+      const qStems = new Set([...qWords].map(stem));
       return rows
-        .filter((f: any) =>
-          f.question.toLowerCase().split(/\W+/).some((w: string) => w.length > 3 && q.includes(w)) ||
-          (f.keywords ?? []).some((k: string) => q.includes(k.toLowerCase())))
+        .map((f: any) => {
+          const kw = (f.keywords ?? []).map((k: string) => k.toLowerCase());
+          const hits = kw.filter((k: string) => qWords.has(k) || qStems.has(stem(k))).length * 2
+            + [...words(f.question)].filter((w) => qStems.has(stem(w))).length;
+          return { f, hits };
+        })
+        .filter((x: any) => x.hits > 0)
+        .sort((a: any, b: any) => b.hits - a.hits)
         .slice(0, 3)
-        .map((f: any) => ({ question: f.question, answer: f.answer }));
+        .map(({ f }: any) => ({ question: f.question, answer: f.answer }));
     }),
 
     /* ── menu ── */
@@ -247,7 +263,8 @@ export function makeTools(ctx: ToolContext) {
       const order: OrderView | null = args.orderId
         ? await getOrder(ctx.scope, args.orderId)
         : args.orderNumber != null ? await getOrderByNumber(ctx.scope, args.orderNumber) : null;
-      if (!order) return null;
+      // A customer may only ever learn about THEIR OWN orders (eval CV15).
+      if (!order || order.customerId !== ctx.customerId) return null;
       return {
         orderNumber: order.orderNumber, status: order.status,
         total: formatCents(order.totalCents, ctx.currency),

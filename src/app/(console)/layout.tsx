@@ -6,6 +6,7 @@ import { getDb } from '../../db/client';
 import { restaurants } from '../../db/schema';
 import { eq } from 'drizzle-orm';
 import { ConsoleNav } from './nav';
+import { RestaurantProvider } from '../../components/restaurant';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,7 +52,11 @@ export default async function ConsoleLayout({ children }: { children: ReactNode 
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-[1400px] px-4 py-6">{children}</main>
+      <main className="mx-auto w-full max-w-[1400px] px-4 py-6">
+        <RestaurantProvider value={{ name: restaurant?.name ?? '', currency: restaurant?.currency ?? 'USD', timezone: restaurant?.timezone ?? 'UTC' }}>
+          {children}
+        </RestaurantProvider>
+      </main>
     </div>
   );
 }

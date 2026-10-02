@@ -3,15 +3,14 @@ import { currentUser, activeRestaurantId } from '../../../server/http';
 import { scopeForUser } from '../../../server/auth/service';
 import { correlationId } from '../../../lib/ids';
 import { getDb } from '../../../db/client';
-import { restaurants, restaurantSettings, locations, businessHours } from '../../../db/schema';
-import { eq, and } from 'drizzle-orm';
+import { restaurants, restaurantSettings } from '../../../db/schema';
+import { eq } from 'drizzle-orm';
 import { whatsappStatus } from '../../../server/messaging/registry';
 import { printerHealth } from '../../../server/printing/service';
-import { minutesToClock } from '../../../lib/time';
+import { SettingsForm } from './form';
 
 export const dynamic = 'force-dynamic';
 
-const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 export default async function SettingsPage() {
   const user = await currentUser();
@@ -24,9 +23,6 @@ export default async function SettingsPage() {
   const [restaurant] = await db.drizzle.select().from(restaurants).where(eq(restaurants.id, restaurantId)).limit(1);
   const [settings] = await db.drizzle.select().from(restaurantSettings)
     .where(eq(restaurantSettings.restaurantId, restaurantId)).limit(1);
-  const locs = await db.drizzle.select().from(locations).where(eq(locations.restaurantId, restaurantId));
-  const hours = await db.drizzle.select().from(businessHours)
-    .where(eq(businessHours.restaurantId, restaurantId));
 
   const wa = await whatsappStatus(restaurantId);
   const printers = await printerHealth(scope);
@@ -40,6 +36,7 @@ export default async function SettingsPage() {
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
+      <SettingsForm />
       <section className="surface rounded-xl p-4">
         <h2 className="mb-3 text-sm font-semibold">Restaurant</h2>
         <Row label="Name" value={restaurant?.name ?? '—'} />
@@ -62,38 +59,6 @@ export default async function SettingsPage() {
             <code>/api/webhooks/whatsapp</code>. Unofficial WhatsApp automation is never used.
           </p>
         ) : null}
-      </section>
-
-      <section className="surface rounded-xl p-4">
-        <h2 className="mb-3 text-sm font-semibold">Pickup &amp; capacity</h2>
-        {locs.map((l: any) => (
-          <div key={l.id} className="mb-3">
-            <div className="mb-1 text-sm font-medium">{l.name}</div>
-            <Row label="Kitchen status" value={l.capacityState} />
-            <Row label="Slot length" value={`${l.slotMinutes} min`} />
-            <Row label="Orders per slot" value={`${l.maxOrdersPerSlot} (${l.maxOrdersPerSlotBusy} when very busy)`} />
-            <Row label="Minimum lead time" value={`${l.minLeadMinutes} min`} />
-            <Row label="Book ahead up to" value={`${Math.round(l.maxAdvanceMinutes / 60)} h`} />
-            <Row label="Manual ETA padding" value={`${l.etaOffsetMinutes} min`} />
-          </div>
-        ))}
-        <Row label="Default prep time" value={`${settings?.defaultPrepMinutes ?? 0} min`} />
-        <Row label="Scheduled orders" value={settings?.allowScheduledOrders ? 'allowed' : 'off'} />
-        <Row label="Minimum order" value={`${((settings?.minOrderCents ?? 0) / 100).toFixed(2)}`} />
-      </section>
-
-      <section className="surface rounded-xl p-4">
-        <h2 className="mb-3 text-sm font-semibold">Opening hours</h2>
-        {DAYS.map((day, index) => {
-          const h = hours.find((x: any) => x.dayOfWeek === index);
-          return (
-            <Row
-              key={day}
-              label={day}
-              value={!h ? 'not set' : h.isClosed ? 'closed' : `${minutesToClock(h.openMinute)} – ${minutesToClock(h.closeMinute)}`}
-            />
-          );
-        })}
       </section>
 
       <section className="surface rounded-xl p-4">

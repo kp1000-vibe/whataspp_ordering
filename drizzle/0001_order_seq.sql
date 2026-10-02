@@ -1,0 +1,1 @@
+ALTER TABLE "restaurants" ADD COLUMN "order_seq" integer DEFAULT 1000 NOT NULL;

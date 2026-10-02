@@ -1,0 +1,1042 @@
+{
+  "suite": "conversation",
+  "ranAt": "2026-09-24T07:16:11.473Z",
+  "total": 34,
+  "passed": 17,
+  "failed": 17,
+  "results": [
+    {
+      "suite": "conversation",
+      "id": "CV01",
+      "title": "spec §6: one chicken biryani → asks spice → \"Spicy\" → total + pickup → \"yes\"",
+      "pass": false,
+      "checks": [
+        {
+          "ok": true,
+          "label": "asks for the spice level",
+          "expected": "/regular|spicy/i",
+          "actual": "For the Chicken Biryani, which spice level would you like? Extra Spicy or Regular or Spicy."
+        },
+        {
+          "ok": true,
+          "label": "no priceable order was created",
+          "expected": 0,
+          "actual": 0
+        },
+        {
+          "ok": true,
+          "label": "draft is ready for confirmation",
+          "expected": "READY_FOR_CONFIRMATION",
+          "actual": "READY_FOR_CONFIRMATION"
+        },
+        {
+          "ok": true,
+          "label": "order lines",
+          "expected": [
+            {
+              "item": "Chicken Biryani",
+              "qty": 1,
+              "mods": [
+                "Spicy"
+              ]
+            }
+          ],
+          "actual": [
+            {
+              "item": "Chicken Biryani",
+              "qty": 1,
+              "mods": [
+                "Spicy"
+              ]
+            }
+          ]
+        },
+        {
+          "ok": true,
+          "label": "quotes total (240 + 5% tax)",
+          "expected": "₹252.00",
+          "actual": "Here's your order:\n• 1 x Chicken Biryani (Spicy) — ₹240.00\n\nSubtotal: ₹240.00\nTax: ₹12.00\nTotal: ₹252.00\n\nPickup at 7:45 PM works.\nShall I confirm?"
+        },
+        {
+          "ok": true,
+          "label": "quotes a pickup time",
+          "expected": true,
+          "actual": true
+        },
+        {
+          "ok": true,
+          "label": "order is with the restaurant",
+          "expected": "RECEIVED",
+          "actual": "RECEIVED"
+        },
+        {
+          "ok": true,
+          "label": "reply contains /Confirmed/i",
+          "expected": "/Confirmed/i",
+          "actual": "Confirmed! Your order #1037 will be ready around 8:00 PM. We'll message you when it's ready."
+        },
+        {
+          "ok": true,
+          "label": "exactly one message on confirmation",
+          "expected": 1,
+          "actual": 1
+        },
+        {
+          "ok": false,
+          "label": "time quoted BEFORE confirming = time promised",
+          "expected": "8:00 PM",
+          "actual": "7:45 PM"
+        },
+        {
+          "ok": true,
+          "label": "time in confirmation = time promised",
+          "expected": "8:00 PM",
+          "actual": "8:00 PM"
+        }
+      ],
+      "ms": 5710
+    },
+    {
+      "suite": "conversation",
+      "id": "CV02",
+      "title": "spec §1: '2 chicken biryani, one spicy, 2 Coke. I'll pick it up around 8'",
+      "pass": false,
+      "checks": [
+        {
+          "ok": true,
+          "label": "draft is ready for confirmation",
+          "expected": "READY_FOR_CONFIRMATION",
+          "actual": "READY_FOR_CONFIRMATION"
+        },
+        {
+          "ok": true,
+          "label": "order lines",
+          "expected": [
+            {
+              "item": "Chicken Biryani",
+              "qty": 1,
+              "mods": [
+                "Regular"
+              ]
+            },
+            {
+              "item": "Chicken Biryani",
+              "qty": 1,
+              "mods": [
+                "Spicy"
+              ]
+            },
+            {
+              "item": "Coke",
+              "qty": 2,
+              "mods": []
+            }
+          ],
+          "actual": [
+            {
+              "item": "Chicken Biryani",
+              "qty": 1,
+              "mods": [
+                "Regular"
+              ]
+            },
+            {
+              "item": "Chicken Biryani",
+              "qty": 1,
+              "mods": [
+                "Spicy"
+              ]
+            },
+            {
+              "item": "Coke",
+              "qty": 2,
+              "mods": []
+            }
+          ]
+        },
+        {
+          "ok": false,
+          "label": "honours the requested 8 PM",
+          "expected": "8:00 PM",
+          "actual": "That time is full. The next available pickup is 7:30 PM. Would you like that?\n\nHere's your order:\n• 1 x Chicken Biryani (Regular) — ₹240.00\n• 1 x Chicken Biryani (Spicy) — ₹240.00\n• 2 x Coke — ₹120.00\n\nSubtotal: ₹600.00\nDiscount: -₹60.00\nTax: ₹27.00\nTotal: ₹567.00\n\nThat time is full. The next available pickup is 7:30 PM. Would you like that?"
+        },
+        {
+          "ok": false,
+          "label": "promised 8:00 PM",
+          "expected": "8:00 PM",
+          "actual": null
+        },
+        {
+          "ok": false,
+          "label": "confirmation repeats 8:00 PM",
+          "expected": "8:00 PM",
+          "actual": "Confirmed! Your order #1037 We'll message you when it's ready."
+        }
+      ],
+      "ms": 2709
+    },
+    {
+      "suite": "conversation",
+      "id": "CV03",
+      "title": "add then \"actually remove the naan\"",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "draft is ready for confirmation",
+          "expected": "READY_FOR_CONFIRMATION",
+          "actual": "READY_FOR_CONFIRMATION"
+        },
+        {
+          "ok": true,
+          "label": "order lines",
+          "expected": [
+            {
+              "item": "Coke",
+              "qty": 2,
+              "mods": []
+            }
+          ],
+          "actual": [
+            {
+              "item": "Coke",
+              "qty": 2,
+              "mods": []
+            }
+          ]
+        }
+      ],
+      "ms": 2410
+    },
+    {
+      "suite": "conversation",
+      "id": "CV04",
+      "title": "\"remove 1 coke\" reduces quantity instead of deleting the line",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "draft is ready for confirmation",
+          "expected": "READY_FOR_CONFIRMATION",
+          "actual": "CANCELLED"
+        },
+        {
+          "ok": false,
+          "label": "order lines",
+          "expected": [
+            {
+              "item": "Coke",
+              "qty": 2,
+              "mods": []
+            }
+          ],
+          "actual": [
+            {
+              "item": "Coke",
+              "qty": 3,
+              "mods": []
+            }
+          ]
+        }
+      ],
+      "ms": 2271
+    },
+    {
+      "suite": "conversation",
+      "id": "CV05",
+      "title": "\"make it 3 cokes\" sets the quantity (does not add 3 more)",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "draft is ready for confirmation",
+          "expected": "READY_FOR_CONFIRMATION",
+          "actual": "READY_FOR_CONFIRMATION"
+        },
+        {
+          "ok": true,
+          "label": "order lines",
+          "expected": [
+            {
+              "item": "Coke",
+              "qty": 3,
+              "mods": []
+            },
+            {
+              "item": "Garlic Naan",
+              "qty": 1,
+              "mods": []
+            }
+          ],
+          "actual": [
+            {
+              "item": "Coke",
+              "qty": 3,
+              "mods": []
+            },
+            {
+              "item": "Garlic Naan",
+              "qty": 1,
+              "mods": []
+            }
+          ]
+        }
+      ],
+      "ms": 2427
+    },
+    {
+      "suite": "conversation",
+      "id": "CV06",
+      "title": "\"make it spicy\" changes the modifier on the dish",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "draft is ready for confirmation",
+          "expected": "READY_FOR_CONFIRMATION",
+          "actual": "READY_FOR_CONFIRMATION"
+        },
+        {
+          "ok": true,
+          "label": "order lines",
+          "expected": [
+            {
+              "item": "Chicken Biryani",
+              "qty": 1,
+              "mods": [
+                "Spicy"
+              ]
+            },
+            {
+              "item": "Coke",
+              "qty": 1,
+              "mods": []
+            }
+          ],
+          "actual": [
+            {
+              "item": "Chicken Biryani",
+              "qty": 1,
+              "mods": [
+                "Spicy"
+              ]
+            },
+            {
+              "item": "Coke",
+              "qty": 1,
+              "mods": []
+            }
+          ]
+        }
+      ],
+      "ms": 2522
+    },
+    {
+      "suite": "conversation",
+      "id": "CV07",
+      "title": "\"actually add a coke\" adds to the draft",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "draft is ready for confirmation",
+          "expected": "READY_FOR_CONFIRMATION",
+          "actual": "CLARIFICATION_REQUIRED"
+        },
+        {
+          "ok": false,
+          "label": "order lines",
+          "expected": [
+            {
+              "item": "Chicken Biryani",
+              "qty": 1,
+              "mods": [
+                "Regular"
+              ]
+            },
+            {
+              "item": "Coke",
+              "qty": 1,
+              "mods": []
+            }
+          ],
+          "actual": [
+            {
+              "item": "Coke",
+              "qty": 1,
+              "mods": []
+            }
+          ]
+        }
+      ],
+      "ms": 2567
+    },
+    {
+      "suite": "conversation",
+      "id": "CV08",
+      "title": "\"cancel\" on a draft cancels it",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "draft cancelled",
+          "expected": "CANCELLED",
+          "actual": "READY_FOR_CONFIRMATION"
+        },
+        {
+          "ok": true,
+          "label": "reply contains /cancel/i",
+          "expected": "/cancel/i",
+          "actual": "I couldn't find \"cancel\" on our menu."
+        }
+      ],
+      "ms": 3126
+    },
+    {
+      "suite": "conversation",
+      "id": "CV09",
+      "title": "cancel after the kitchen started → not cancelled, handed to staff",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "order not cancelled",
+          "expected": "PREPARING",
+          "actual": "PREPARING"
+        },
+        {
+          "ok": true,
+          "label": "reply contains /already being prepared/i",
+          "expected": "/already being prepared/i",
+          "actual": "Your order is already being prepared. Let me connect you with the restaurant team to see what we can do."
+        },
+        {
+          "ok": true,
+          "label": "handed to staff",
+          "expected": "STAFF",
+          "actual": "STAFF"
+        }
+      ],
+      "ms": 2661
+    },
+    {
+      "suite": "conversation",
+      "id": "CV10",
+      "title": "cancel after confirming but before cooking → cancelled",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "cancelled",
+          "expected": "CANCELLED",
+          "actual": "CANCELLED"
+        }
+      ],
+      "ms": 2327
+    },
+    {
+      "suite": "conversation",
+      "id": "CV11",
+      "title": "seeded regular (history lacks the spice choice) → shows usual and asks spice",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "reply contains Chicken Biryani",
+          "expected": "Chicken Biryani",
+          "actual": "Your usual is:\n• 1 x Coke — ₹60.00\n\nthe earliest pickup for this order is 7:30 PM.\nWant me to place that?"
+        },
+        {
+          "ok": true,
+          "label": "reply contains Coke",
+          "expected": "Coke",
+          "actual": "Your usual is:\n• 1 x Coke — ₹60.00\n\nthe earliest pickup for this order is 7:30 PM.\nWant me to place that?"
+        },
+        {
+          "ok": false,
+          "label": "asks the missing required choice",
+          "expected": "/spice level|regular or spicy/i",
+          "actual": "Your usual is:\n• 1 x Coke — ₹60.00\n\nthe earliest pickup for this order is 7:30 PM.\nWant me to place that?"
+        },
+        {
+          "ok": true,
+          "label": "usual is never shown as an empty list",
+          "expected": "not /Your usual is:\\s*\\n\\s*\\n/",
+          "actual": "Your usual is:\n• 1 x Coke — ₹60.00\n\nthe earliest pickup for this order is 7:30 PM.\nWant me to place that?"
+        }
+      ],
+      "ms": 3880
+    },
+    {
+      "suite": "conversation",
+      "id": "CV12",
+      "title": "repeat reproduces the exact previous order including modifiers",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "draft is ready for confirmation",
+          "expected": "READY_FOR_CONFIRMATION",
+          "actual": "READY_FOR_CONFIRMATION"
+        },
+        {
+          "ok": true,
+          "label": "order lines",
+          "expected": [
+            {
+              "item": "Coke",
+              "qty": 2,
+              "mods": []
+            },
+            {
+              "item": "Mutton Biryani",
+              "qty": 1,
+              "mods": [
+                "Extra Raita",
+                "Extra Spicy"
+              ]
+            }
+          ],
+          "actual": [
+            {
+              "item": "Coke",
+              "qty": 2,
+              "mods": []
+            },
+            {
+              "item": "Mutton Biryani",
+              "qty": 1,
+              "mods": [
+                "Extra Raita",
+                "Extra Spicy"
+              ]
+            }
+          ]
+        }
+      ],
+      "ms": 2872
+    },
+    {
+      "suite": "conversation",
+      "id": "CV13",
+      "title": "repeat when an item is now sold out → tells the customer",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "reply contains /Garlic Naan/",
+          "expected": "/Garlic Naan/",
+          "actual": "Your usual is:\n• 2 x Coke — ₹120.00\n\nthe earliest pickup for this order is 7:30 PM.\nWant me to place that?"
+        },
+        {
+          "ok": false,
+          "label": "reply contains /sold out|unavailable/i",
+          "expected": "/sold out|unavailable/i",
+          "actual": "Your usual is:\n• 2 x Coke — ₹120.00\n\nthe earliest pickup for this order is 7:30 PM.\nWant me to place that?"
+        }
+      ],
+      "ms": 2521
+    },
+    {
+      "suite": "conversation",
+      "id": "CV14",
+      "title": "\"where is my order?\" after confirming → reports that order",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "reply contains #1037",
+          "expected": "#1037",
+          "actual": "I couldn't find \"where is my\" on our menu."
+        }
+      ],
+      "ms": 2297
+    },
+    {
+      "suite": "conversation",
+      "id": "CV15",
+      "title": "one customer cannot see another customer's order by number",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "does not report someone else's order",
+          "expected": "not #1037 is",
+          "actual": "Order #1037 is with the restaurant, ready around 7:45 PM."
+        },
+        {
+          "ok": true,
+          "label": "does not reveal amounts",
+          "expected": "not ₹",
+          "actual": "Order #1037 is with the restaurant, ready around 7:45 PM."
+        }
+      ],
+      "ms": 2456
+    },
+    {
+      "suite": "conversation",
+      "id": "CV16",
+      "title": "staff takeover silences the AI; hand-back resumes it",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "AI silent while staff hold the chat",
+          "expected": "",
+          "actual": ""
+        },
+        {
+          "ok": true,
+          "label": "AI answers after hand-back"
+        }
+      ],
+      "ms": 2217
+    },
+    {
+      "suite": "conversation",
+      "id": "CV17",
+      "title": "allergy escalation hands the chat to staff and the AI stays out",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "AI stays silent after escalating",
+          "expected": "",
+          "actual": ""
+        }
+      ],
+      "ms": 2326
+    },
+    {
+      "suite": "conversation",
+      "id": "CV18",
+      "title": "Hinglish voice note becomes the right order, tagged as voice",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "draft is ready for confirmation",
+          "expected": "READY_FOR_CONFIRMATION",
+          "actual": "READY_FOR_CONFIRMATION"
+        },
+        {
+          "ok": true,
+          "label": "order lines",
+          "expected": [
+            {
+              "item": "Chicken Biryani",
+              "qty": 1,
+              "mods": [
+                "Regular"
+              ]
+            },
+            {
+              "item": "Chicken Biryani",
+              "qty": 1,
+              "mods": [
+                "Spicy"
+              ]
+            },
+            {
+              "item": "Coke",
+              "qty": 1,
+              "mods": []
+            }
+          ],
+          "actual": [
+            {
+              "item": "Chicken Biryani",
+              "qty": 1,
+              "mods": [
+                "Regular"
+              ]
+            },
+            {
+              "item": "Chicken Biryani",
+              "qty": 1,
+              "mods": [
+                "Spicy"
+              ]
+            },
+            {
+              "item": "Coke",
+              "qty": 1,
+              "mods": []
+            }
+          ]
+        },
+        {
+          "ok": true,
+          "label": "channel recorded as voice",
+          "expected": "WHATSAPP_VOICE",
+          "actual": "WHATSAPP_VOICE"
+        }
+      ],
+      "ms": 2185
+    },
+    {
+      "suite": "conversation",
+      "id": "CV19",
+      "title": "low-confidence transcript → reads it back and asks",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "reply contains /I heard/i",
+          "expected": "/I heard/i",
+          "actual": "I heard: \"2 coke and 1 garlic naan\". Did I get that right?\n\nHere's your order:\n• 2 x Coke — ₹120.00\n• 1 x Garlic Naan — ₹70.00\n\nSubtotal: ₹190.00\nTax: ₹9.50\nTotal: ₹199.50\n\nthe earliest pickup for this order is 7:30 PM.\nShall I confirm?"
+        }
+      ],
+      "ms": 2168
+    },
+    {
+      "suite": "conversation",
+      "id": "CV20",
+      "title": "untranscribable voice note → asks the customer to type",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "reply contains /couldn't make out|type/i",
+          "expected": "/couldn't make out|type/i",
+          "actual": "Sorry, I couldn't make out that voice note. Could you type your order?"
+        },
+        {
+          "ok": true,
+          "label": "no priceable order was created",
+          "expected": 0,
+          "actual": 0
+        }
+      ],
+      "ms": 2057
+    },
+    {
+      "suite": "conversation",
+      "id": "CV21",
+      "title": "photo message → polite \"please type\", no crash",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "reply contains /type/i",
+          "expected": "/type/i",
+          "actual": "Sorry, I didn't catch that. You can tell me what you'd like, ask about the menu, or say \"talk to a person\"."
+        }
+      ],
+      "ms": 2033
+    },
+    {
+      "suite": "conversation",
+      "id": "CV22",
+      "title": "Meta re-delivers the same message → one order, one reply",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "one order",
+          "expected": 1,
+          "actual": 1
+        },
+        {
+          "ok": true,
+          "label": "one reply",
+          "expected": 1,
+          "actual": 1
+        }
+      ],
+      "ms": 2246
+    },
+    {
+      "suite": "conversation",
+      "id": "CV23",
+      "title": "👍 confirms a ready draft",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "confirmed",
+          "expected": "RECEIVED",
+          "actual": "READY_FOR_CONFIRMATION"
+        }
+      ],
+      "ms": 2642
+    },
+    {
+      "suite": "conversation",
+      "id": "CV24",
+      "title": "\"ok\" after the order is confirmed → friendly acknowledgement",
+      "pass": false,
+      "checks": [
+        {
+          "ok": true,
+          "label": "replies"
+        },
+        {
+          "ok": false,
+          "label": "reply does not contain /don't have an order ready/i",
+          "expected": "not /don't have an order ready/i",
+          "actual": "I don't have an order ready to confirm yet. What would you like?"
+        }
+      ],
+      "ms": 2287
+    },
+    {
+      "suite": "conversation",
+      "id": "CV25",
+      "title": "draft then \"can I pick it up at 8?\" → rescheduled to 8:00 PM",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "draft moved to 8 PM",
+          "expected": "8:00 PM",
+          "actual": "7:45 PM"
+        },
+        {
+          "ok": false,
+          "label": "reply contains 8:00 PM",
+          "expected": "8:00 PM",
+          "actual": "I couldn't find \"can I pick it up at 8\" on our menu."
+        }
+      ],
+      "ms": 2322
+    },
+    {
+      "suite": "conversation",
+      "id": "CV26",
+      "title": "pickup time first, then the order → time is remembered",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "reply contains /what would you like/i",
+          "expected": "/what would you like/i",
+          "actual": "I couldn't find \"I'll come at 8:30\" on our menu."
+        },
+        {
+          "ok": false,
+          "label": "uses the 8:30 PM request",
+          "expected": "8:30 PM",
+          "actual": "7:45 PM"
+        }
+      ],
+      "ms": 2394
+    },
+    {
+      "suite": "conversation",
+      "id": "CV27",
+      "title": "requested slot full → offered alternative → \"yes\" books THAT alternative",
+      "pass": false,
+      "checks": [],
+      "error": "TypeError: Cannot read properties of null (reading 'toISOString')\n    at Object.fn (C:\\Users\\Aradhana Panigraphy\\Small Business AI\\evals\\conversation.eval.ts:286:96)\n    at async Suite.run (C:\\Users\\Aradhana Panigraphy\\Small Business AI\\evals\\harness.ts:82:9)\n    at async <anonymous> (C:\\Users\\Aradhana Panigraphy\\Small Business AI\\evals\\run.ts:29:19)",
+      "ms": 2512
+    },
+    {
+      "suite": "conversation",
+      "id": "CV28",
+      "title": "a typed promo code is applied",
+      "pass": false,
+      "checks": [
+        {
+          "ok": true,
+          "label": "draft is ready for confirmation",
+          "expected": "READY_FOR_CONFIRMATION",
+          "actual": "READY_FOR_CONFIRMATION"
+        },
+        {
+          "ok": true,
+          "label": "order lines",
+          "expected": [
+            {
+              "item": "Coke",
+              "qty": 2,
+              "mods": []
+            },
+            {
+              "item": "Garlic Naan",
+              "qty": 1,
+              "mods": []
+            }
+          ],
+          "actual": [
+            {
+              "item": "Coke",
+              "qty": 2,
+              "mods": []
+            },
+            {
+              "item": "Garlic Naan",
+              "qty": 1,
+              "mods": []
+            }
+          ]
+        },
+        {
+          "ok": false,
+          "label": "Rs 50 discount applied",
+          "expected": 5000,
+          "actual": 0
+        },
+        {
+          "ok": false,
+          "label": "reply contains -₹50.00",
+          "expected": "-₹50.00",
+          "actual": "I couldn't find \"code SAVE50\" on our menu.\n\nHere's your order:\n• 2 x Coke — ₹120.00\n• 1 x Garlic Naan — ₹70.00\n\nSubtotal: ₹190.00\nTax: ₹9.50\nTotal: ₹199.50\n\nthe earliest pickup for this order is 7:30 PM.\nShall I confirm?"
+        }
+      ],
+      "ms": 2459
+    },
+    {
+      "suite": "conversation",
+      "id": "CV29",
+      "title": "opted-out customer still gets transactional order messages",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "reply contains /Confirmed/i",
+          "expected": "/Confirmed/i",
+          "actual": "Confirmed! Your order #1037 will be ready around 7:45 PM. We'll message you when it's ready."
+        }
+      ],
+      "ms": 2737
+    },
+    {
+      "suite": "conversation",
+      "id": "CV30",
+      "title": "\"also add a coke\" after confirming → a separate new order, first untouched",
+      "pass": false,
+      "checks": [
+        {
+          "ok": true,
+          "label": "confirmed order unchanged",
+          "expected": [
+            {
+              "item": "Coke",
+              "qty": 2,
+              "mods": []
+            },
+            {
+              "item": "Garlic Naan",
+              "qty": 1,
+              "mods": []
+            }
+          ],
+          "actual": [
+            {
+              "item": "Coke",
+              "qty": 2,
+              "mods": []
+            },
+            {
+              "item": "Garlic Naan",
+              "qty": 1,
+              "mods": []
+            }
+          ]
+        },
+        {
+          "ok": false,
+          "label": "tells the customer it is a new order",
+          "expected": "/new order|separate/i",
+          "actual": "Here's your order:\n• 2 x Coke — ₹120.00\n\nSubtotal: ₹120.00\nTax: ₹6.00\nTotal: ₹126.00\n\nthe earliest pickup for this order is 7:30 PM.\nShall I confirm?"
+        }
+      ],
+      "ms": 2368
+    },
+    {
+      "suite": "conversation",
+      "id": "CV31",
+      "title": "Hinglish customer gets Hinglish confirmation",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "reply contains /Aapka order/",
+          "expected": "/Aapka order/",
+          "actual": "Confirmed! Aapka order #1037 ready ho jayega around 7:45 PM. Ready hone par hum aapko message karenge."
+        }
+      ],
+      "ms": 2178
+    },
+    {
+      "suite": "conversation",
+      "id": "CV32",
+      "title": "kitchen PREPARING and READY each send exactly one message",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "one \"preparing\" message",
+          "expected": 1,
+          "actual": 1
+        },
+        {
+          "ok": true,
+          "label": "reply contains /prepared/i",
+          "expected": "/prepared/i",
+          "actual": "Your order is being prepared. 👨‍🍳"
+        },
+        {
+          "ok": true,
+          "label": "one \"ready\" message",
+          "expected": 1,
+          "actual": 1
+        },
+        {
+          "ok": true,
+          "label": "reply contains /ready/i",
+          "expected": "/ready/i",
+          "actual": "Your order is ready for pickup! 🎉 #1037"
+        }
+      ],
+      "ms": 2157
+    },
+    {
+      "suite": "conversation",
+      "id": "CV33",
+      "title": "running late: customer is told the new time",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "message carries the new time",
+          "expected": "8:00 PM",
+          "actual": "We're running a little behind. Your updated pickup time is 8:00 PM."
+        },
+        {
+          "ok": true,
+          "label": "promise moved 15 min",
+          "expected": 900000,
+          "actual": 900000
+        }
+      ],
+      "ms": 2097
+    },
+    {
+      "suite": "conversation",
+      "id": "CV34",
+      "title": "conversation audit: the order links to the full transcript",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "order has a conversation id"
+        },
+        {
+          "ok": true,
+          "label": "customer messages kept",
+          "expected": ">= 2",
+          "actual": 2
+        },
+        {
+          "ok": true,
+          "label": "replies kept",
+          "expected": ">= 2",
+          "actual": 2
+        }
+      ],
+      "ms": 2927
+    }
+  ]
+}

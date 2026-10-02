@@ -48,7 +48,28 @@ export async function whatsappStatus(restaurantId: string): Promise<WhatsappStat
   };
 }
 
+/** Wraps a provider so every message Meta would bill for is counted (eval B22). */
+function metered(restaurantId: string, p: MessagingProvider): MessagingProvider {
+  return {
+    name: p.name,
+    async send(msg) {
+      const res = await p.send(msg);
+      if (res.ok) {
+        const { bumpUsage } = await import('../usage');
+        await bumpUsage(restaurantId, msg.category === 'MARKETING' ? 'wa_marketing_out' : 'wa_messages_out');
+      }
+      return res;
+    },
+    downloadMedia: (id) => p.downloadMedia(id),
+    parseWebhook: (body) => p.parseWebhook(body),
+  };
+}
+
 export async function messagingFor(restaurantId: string): Promise<MessagingProvider> {
+  return metered(restaurantId, await rawMessagingFor(restaurantId));
+}
+
+async function rawMessagingFor(restaurantId: string): Promise<MessagingProvider> {
   if (process.env.MESSAGING_PROVIDER === 'mock') return mockProviderFor(restaurantId);
 
   const db = await getDb();

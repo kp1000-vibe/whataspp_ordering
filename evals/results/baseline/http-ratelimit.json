@@ -1,0 +1,35 @@
+{
+  "suite": "http-ratelimit",
+  "ranAt": "2026-09-24T07:23:10.357Z",
+  "total": 2,
+  "passed": 1,
+  "failed": 1,
+  "results": [
+    {
+      "suite": "http-ratelimit",
+      "id": "HL01",
+      "title": "brute force on one account is stopped even when X-Forwarded-For rotates",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "locked out within 12 attempts"
+        }
+      ],
+      "ms": 562
+    },
+    {
+      "suite": "http-ratelimit",
+      "id": "HL02",
+      "title": "signup flood from one client is limited",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "signups limited"
+        }
+      ],
+      "ms": 140
+    }
+  ]
+}

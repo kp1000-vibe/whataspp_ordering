@@ -82,9 +82,9 @@ export default function KitchenPage() {
 
         return (
           <section key={column.title} className="space-y-3">
-            <h2 className="px-1 text-lg font-bold tracking-wide">
-              {column.title}
-              <span className="ml-2 text-base font-normal muted">{columnOrders.length}</span>
+            <h2 className="flex items-baseline gap-2 px-1 text-lg font-bold tracking-wide">
+              <span>{column.title}</span>{' '}
+              <span className="text-base font-normal muted" aria-label={`${columnOrders.length} orders`}>{columnOrders.length}</span>
             </h2>
 
             {columnOrders.length === 0 ? (
