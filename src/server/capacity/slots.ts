@@ -16,11 +16,12 @@
  */
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { locations, restaurantSettings } from '../../db/schema';
+import { locations, restaurantSettings, businessHours, holidayHours } from '../../db/schema';
 import { menuItems } from '../../db/schema';
 import { inArray } from 'drizzle-orm';
-import { localParts, minutesToClock, addMinutes } from '../../lib/time';
+import { localParts, minutesToClock, addMinutes, whenLabel } from '../../lib/time';
 import { openState } from '../prep/engine';
+import { now as clockNow } from '../../lib/clock';
 import type { TenantScope } from '../tenancy';
 
 export type CapacityState = 'OPEN' | 'BUSY' | 'VERY_BUSY' | 'PAUSED' | 'CLOSED';
@@ -42,8 +43,10 @@ export type Slot = {
   /** Absolute start of the slot. */
   start: Date;
   end: Date;
-  /** Local clock label, e.g. "7:45 PM". */
+  /** Local clock label of the PROMISED time (slot end), e.g. "7:45 PM". */
   label: string;
+  /** Same, with a day when it isn't today: "tomorrow at 11:30 AM". */
+  when: string;
   /** Range label, e.g. "7:45-8:00 PM". */
   rangeLabel: string;
   booked: number;
@@ -77,7 +80,7 @@ export async function getCapacity(scope: TenantScope, locationId: string): Promi
   const db = await getDb();
   const [loc] = await db.drizzle.select().from(locations).where(and(
     eq(locations.restaurantId, scope.restaurantId), eq(locations.id, locationId))).limit(1);
-  if (!loc) throw new Error('location not found in this restaurant');
+  if (!loc) { const { NotFoundError } = await import('../errors'); throw new NotFoundError('Location not found.'); }
 
   const effectiveMax = loc.capacityState === 'VERY_BUSY' ? loc.maxOrdersPerSlotBusy : loc.maxOrdersPerSlot;
 
@@ -157,14 +160,81 @@ export type SlotQuery = {
   alternatives?: number;
 };
 
-/**
- * Lists the pickup slots between the earliest possible time and the horizon,
- * marking each as available or not, and why.
- */
-export async function listSlots(scope: TenantScope, q: SlotQuery): Promise<{
-  slots: Slot[]; capacity: LocationCapacity; earliestReadyAt: Date; prepMinutes: number;
-}> {
-  const now = q.at ?? new Date();
+/* ─────────────── opening hours, per slot ─────────────── */
+
+type HoursIndex = {
+  /** Is the whole slot [start, end) inside opening hours on its own local day? */
+  slotOpen: (start: Date, end: Date) => boolean;
+  /** The next instant at or after `from` when the kitchen is open. */
+  nextOpening: (from: Date) => Date | null;
+  /** Today's closing minute-of-day, or null if closed today. */
+  closeMinuteOn: (at: Date) => number | null;
+};
+
+async function hoursIndex(scope: TenantScope, locationId: string, tz: string): Promise<HoursIndex> {
+  const db = await getDb();
+  const hours = await db.drizzle.select().from(businessHours).where(eq(businessHours.restaurantId, scope.restaurantId));
+  const holidays = await db.drizzle.select().from(holidayHours).where(eq(holidayHours.restaurantId, scope.restaurantId));
+  const forLoc = hours.filter((h: any) => h.locationId === locationId);
+  const pool = forLoc.length ? forLoc : hours.filter((h: any) => h.locationId === null);
+  const holidayBy = new Map<string, any>(holidays.map((h: any) => [h.date, h]));
+
+  /** [open, close] minute window for a local date, or null if closed all day. */
+  const windowFor = (at: Date): [number, number] | null => {
+    const lp = localParts(at, tz);
+    const hol = holidayBy.get(lp.dateKey);
+    if (hol) return hol.isClosed || hol.openMinute == null ? null : [hol.openMinute, hol.closeMinute];
+    const day = pool.find((h: any) => h.dayOfWeek === lp.dayOfWeek);
+    return !day || day.isClosed ? null : [day.openMinute, day.closeMinute];
+  };
+
+  return {
+    slotOpen(start, end) {
+      const s = localParts(start, tz);
+      const e = localParts(end, tz);
+      if (s.dateKey !== e.dateKey && e.minuteOfDay !== 0) return false;  // slots never span midnight
+      const w = windowFor(start);
+      if (!w) return false;
+      const endMinute = e.minuteOfDay === 0 && s.dateKey !== e.dateKey ? 1440 : e.minuteOfDay;
+      return s.minuteOfDay >= w[0] && endMinute <= w[1];
+    },
+    nextOpening(from) {
+      for (let d = 0; d <= 8; d++) {
+        const day = new Date(from.getTime() + d * 86_400_000);
+        const w = windowFor(day);
+        if (!w) continue;
+        const m = localParts(day, tz).minuteOfDay;
+        if (d === 0) {
+          if (m >= w[0] && m < w[1]) return from;
+          if (m < w[0]) return new Date(from.getTime() + (w[0] - m) * 60_000);
+          continue;
+        }
+        return new Date(day.getTime() + (w[0] - m) * 60_000);
+      }
+      return null;
+    },
+    closeMinuteOn(at) {
+      return windowFor(at)?.[1] ?? null;
+    },
+  };
+}
+
+/* ─────────────── slots ─────────────── */
+
+type SlotPlan = {
+  slots: Slot[];                 // every generated slot, including CLOSED ones
+  capacity: LocationCapacity;
+  earliestReadyAt: Date;
+  horizonEnd: Date;
+  prepMinutes: number;
+  kitchenOpenNow: boolean;
+  allowScheduled: boolean;
+  hours: HoursIndex;
+  now: Date;
+};
+
+async function plan(scope: TenantScope, q: SlotQuery, kitchenStartOverride?: Date): Promise<SlotPlan> {
+  const now = q.at ?? clockNow();
   const cap = await getCapacity(scope, q.locationId);
   const db = await getDb();
   const [settings] = await db.drizzle.select().from(restaurantSettings)
@@ -173,114 +243,171 @@ export async function listSlots(scope: TenantScope, q: SlotQuery): Promise<{
   const basePrep = Math.max(settings?.defaultPrepMinutes ?? 20, await itemPrepMinutes(scope, q.menuItemIds));
   const busyPad = cap.state === 'BUSY' || cap.state === 'VERY_BUSY' ? cap.busyEtaPaddingMinutes : 0;
   const prepMinutes = basePrep + busyPad + cap.etaOffsetMinutes;
+  const allowScheduled = !!settings?.allowScheduledOrders;
 
-  const earliestReadyAt = addMinutes(now, Math.max(prepMinutes, cap.minLeadMinutes));
-  const horizon = addMinutes(now, cap.maxAdvanceMinutes);
+  const hours = await hoursIndex(scope, q.locationId, cap.timezone);
+  const openNow = hours.nextOpening(now)?.getTime() === now.getTime();
 
-  const open = await openState(scope, q.locationId, cap.timezone, now);
-  const closeMinute = open.todayCloseMinute;
+  // The kitchen cannot start cooking before it opens.
+  const kitchenStart = kitchenStartOverride ?? (openNow ? now : (hours.nextOpening(now) ?? now));
+  const earliestReadyAt = addMinutes(kitchenStart, Math.max(prepMinutes, cap.minLeadMinutes));
+  let horizonEnd = addMinutes(kitchenStart, cap.maxAdvanceMinutes);
 
-  const firstSlot = slotStartFor(earliestReadyAt, cap.slotMinutes);
-  const bookings = await bookingsBySlot(scope, q.locationId, firstSlot, addMinutes(horizon, cap.slotMinutes));
+  // Without scheduled orders nothing may be promised after tonight's close.
+  if (!allowScheduled) {
+    const close = hours.closeMinuteOn(now);
+    if (close != null) {
+      const lp = localParts(now, cap.timezone);
+      const closeAt = addMinutes(now, close - lp.minuteOfDay);
+      if (closeAt < horizonEnd) horizonEnd = closeAt;
+    }
+  }
+
+  const slotMs = cap.slotMinutes * 60_000;
+  const firstStart = slotStartFor(earliestReadyAt, cap.slotMinutes);
+  const bookings = await bookingsBySlot(scope, q.locationId, firstStart, addMinutes(horizonEnd, cap.slotMinutes * 2));
 
   const slots: Slot[] = [];
-  for (let t = firstSlot.getTime(); t <= horizon.getTime(); t += cap.slotMinutes * 60_000) {
+  for (let t = firstStart.getTime(); t < horizonEnd.getTime() + slotMs; t += slotMs) {
     const start = new Date(t);
-    const end = addMinutes(start, cap.slotMinutes);
+    const end = new Date(t + slotMs);
+    if (end > addMinutes(horizonEnd, cap.slotMinutes)) break;
     const booked = bookings.get(t) ?? 0;
 
     let blockedReason: Slot['blockedReason'];
-    if (start < earliestReadyAt) blockedReason = 'TOO_SOON';
+    if (end < earliestReadyAt) blockedReason = 'TOO_SOON';
+    else if (!hours.slotOpen(start, end)) blockedReason = 'CLOSED';
+    else if (end > horizonEnd) blockedReason = 'BEYOND_HORIZON';
     else if (booked >= cap.maxOrdersPerSlot) blockedReason = 'FULL';
-    else if (closeMinute != null && localParts(start, cap.timezone).minuteOfDay > closeMinute) blockedReason = 'CLOSED';
 
-    const local = localParts(start, cap.timezone);
-    const localEnd = localParts(end, cap.timezone);
-
-    slots.push({
-      start, end,
-      label: minutesToClock(local.minuteOfDay),
-      rangeLabel: `${minutesToClock(local.minuteOfDay)}-${minutesToClock(localEnd.minuteOfDay)}`,
-      booked, capacity: cap.maxOrdersPerSlot,
-      available: !blockedReason,
-      blockedReason,
-    });
+    slots.push(makeSlot(start, end, booked, cap, now, blockedReason));
   }
 
-  return { slots, capacity: cap, earliestReadyAt, prepMinutes };
+  return { slots, capacity: cap, earliestReadyAt, horizonEnd, prepMinutes, kitchenOpenNow: openNow, allowScheduled, hours, now };
+}
+
+function makeSlot(start: Date, end: Date, booked: number, cap: LocationCapacity, now: Date, blockedReason?: Slot['blockedReason']): Slot {
+  const s = localParts(start, cap.timezone);
+  const e = localParts(end, cap.timezone);
+  return {
+    start, end,
+    // The label IS the promise: food is ready by the END of the slot, and that
+    // single time is what the customer sees before AND after confirming.
+    label: minutesToClock(e.minuteOfDay),
+    when: whenLabel(end, now, cap.timezone),
+    rangeLabel: `${minutesToClock(s.minuteOfDay)}-${minutesToClock(e.minuteOfDay)}`,
+    booked, capacity: cap.maxOrdersPerSlot,
+    available: !blockedReason,
+    blockedReason,
+  };
 }
 
 /**
- * Allocates the order into the best slot.
- * `requestedAt` honours "I'll pick it up around 8" — if that slot is full we say
- * so explicitly and offer the next one rather than silently moving them.
+ * Pickup slots for display: open slots from the earliest possible pickup up to
+ * the booking horizon. Closed periods are omitted.
  */
-export async function allocateSlot(scope: TenantScope, q: SlotQuery): Promise<SlotAllocation> {
-  const now = q.at ?? new Date();
-  const { slots, capacity, prepMinutes } = await listSlots(scope, q);
-
-  if (capacity.state === 'PAUSED') {
-    return {
-      ok: false, reason: 'PAUSED', capacityState: capacity.state, alternatives: [],
-      text: capacity.note || `We've paused new orders for a few minutes while the kitchen catches up. Please try again shortly.`,
-    };
-  }
-  if (capacity.state === 'CLOSED') {
-    const open = await openState(scope, q.locationId, capacity.timezone, now);
-    return {
-      ok: false, reason: 'CLOSED', capacityState: capacity.state, alternatives: [],
-      text: `${open.message}${open.nextOpenText ? ` We're open ${open.nextOpenText}.` : ''}`.trim(),
-    };
-  }
-
-  const openSlots = slots.filter((s) => s.available);
-  if (openSlots.length === 0) {
-    return {
-      ok: false, reason: 'NO_SLOTS', capacityState: capacity.state,
-      alternatives: slots.slice(0, 3),
-      text: `We're fully booked for pickups today. Sorry about that.`,
-    };
-  }
-
-  // Honour a requested time when we can.
-  if (q.requestedAt) {
-    const wanted = slotStartFor(q.requestedAt, capacity.slotMinutes).getTime();
-    const exact = slots.find((s) => s.start.getTime() === wanted);
-
-    if (exact?.available) {
-      return success(exact, prepMinutes, capacity, true);
-    }
-    const next = openSlots.find((s) => s.start.getTime() > wanted) ?? openSlots[0];
-    const why = exact?.blockedReason === 'TOO_SOON'
-      ? `We can't have it ready that soon`
-      : exact?.blockedReason === 'CLOSED'
-        ? `We're closed by then`
-        : `${exact ? exact.label : 'That time'} is full`;
-
-    return {
-      ok: false, reason: exact?.blockedReason === 'TOO_SOON' ? 'NO_SLOTS' : 'BEYOND_HORIZON',
-      capacityState: capacity.state,
-      alternatives: openSlots.slice(0, q.alternatives ?? 3),
-      text: `${why}. The next available pickup is ${next.label}. Would you like that?`,
-    };
-  }
-
-  return success(openSlots[0], prepMinutes, capacity, false);
+export async function listSlots(scope: TenantScope, q: SlotQuery): Promise<{
+  slots: Slot[]; capacity: LocationCapacity; earliestReadyAt: Date; prepMinutes: number;
+}> {
+  const p = await plan(scope, q);
+  return {
+    slots: p.slots.filter((s) => s.blockedReason !== 'CLOSED' && s.blockedReason !== 'BEYOND_HORIZON'),
+    capacity: p.capacity, earliestReadyAt: p.earliestReadyAt, prepMinutes: p.prepMinutes,
+  };
 }
 
-function success(slot: Slot, prepMinutes: number, cap: LocationCapacity, requested: boolean): SlotAllocation {
-  const busyPrefix = cap.state === 'VERY_BUSY'
-    ? `We're very busy right now — `
-    : cap.state === 'BUSY' ? `We're busy right now — ` : '';
+/** The earliest pickup the engine would promise right now (used for "how long?"). */
+export async function earliestPickup(scope: TenantScope, q: SlotQuery): Promise<{ slot: Slot | null; prepMinutes: number; capacity: LocationCapacity; now: Date }> {
+  const alloc = await allocateSlot(scope, q);
+  const p = await plan(scope, q);
+  return { slot: alloc.ok ? alloc.slot : null, prepMinutes: p.prepMinutes, capacity: p.capacity, now: p.now };
+}
 
+/**
+ * Allocates the order into a real slot.
+ * `requestedAt` honours "I'll pick it up around 8". When that cannot be done,
+ * the customer is told WHY (too soon / closed / too far ahead / full) and offered
+ * exactly one concrete alternative — which is alternatives[0].
+ */
+export async function allocateSlot(scope: TenantScope, q: SlotQuery): Promise<SlotAllocation> {
+  let p = await plan(scope, q);
+  const cap = p.capacity;
+
+  if (cap.state === 'PAUSED') {
+    return { ok: false, reason: 'PAUSED', capacityState: cap.state, alternatives: [],
+      text: cap.note || `We've paused new orders for a few minutes while the kitchen catches up. Please try again shortly.` };
+  }
+  if (cap.state === 'CLOSED') {
+    const open = await openState(scope, q.locationId, cap.timezone, p.now);
+    return { ok: false, reason: 'CLOSED', capacityState: cap.state, alternatives: [],
+      text: `We're closed for today.${open.nextOpenText ? ` We're open ${open.nextOpenText}.` : ''}` };
+  }
+
+  let available = p.slots.filter((s) => s.available);
+
+  // Nothing left today but scheduled orders are allowed: roll to the next opening.
+  if (available.length === 0 && p.allowScheduled) {
+    const after = addMinutes(p.horizonEnd, cap.slotMinutes);
+    const next = p.hours.nextOpening(after);
+    if (next) { p = await plan(scope, q, next); available = p.slots.filter((s) => s.available); }
+  }
+
+  if (available.length === 0) {
+    const open = await openState(scope, q.locationId, cap.timezone, p.now);
+    const closeMin = p.hours.closeMinuteOn(p.now);
+    const closing = closeMin != null ? ` We close at ${minutesToClock(closeMin)}.` : '';
+    return { ok: false, reason: 'NO_SLOTS', capacityState: cap.state, alternatives: [],
+      text: `Sorry — we can't take any more pickups for tonight.${closing}${open.nextOpenText ? ` We're open ${open.nextOpenText}.` : ''}`.replace(/\s+/g, ' ').trim() };
+  }
+
+  if (q.requestedAt) {
+    const slotMs = cap.slotMinutes * 60_000;
+    // The slot whose END (the promise) is at or just after the requested time.
+    const endMs = Math.ceil(q.requestedAt.getTime() / slotMs) * slotMs;
+    const wanted = p.slots.find((s) => s.end.getTime() === endMs);
+    const wantedLabel = whenLabel(new Date(endMs), p.now, cap.timezone);
+
+    if (wanted?.available) return success(wanted, p, true);
+
+    const nearest = [...available].sort((a, b) =>
+      Math.abs(a.end.getTime() - endMs) - Math.abs(b.end.getTime() - endMs))[0];
+    const after = available.find((s) => s.end.getTime() > endMs);
+
+    let text: string;
+    let offer: Slot;
+    if (endMs < p.earliestReadyAt.getTime()) {
+      offer = available[0];
+      text = `We can't have it ready that soon. The earliest pickup is ${offer.when}. Would you like that?`;
+    } else if (endMs > p.horizonEnd.getTime() + slotMs) {
+      offer = available[available.length - 1];
+      const hoursAhead = Math.round(cap.maxAdvanceMinutes / 60);
+      text = p.allowScheduled
+        ? `That's too far ahead — we take pickups up to ${hoursAhead} hours in advance. The latest we can book right now is ${offer.when}. Would you like that?`
+        : `We can only take orders for later today, up to closing. The latest pickup we can book is ${offer.when}. Would you like that?`;
+    } else if (!wanted || wanted.blockedReason === 'CLOSED') {
+      offer = nearest;
+      text = `We're closed at ${wantedLabel}. The closest pickup we can do is ${offer.when}. Would you like that?`;
+    } else {
+      offer = after ?? nearest;
+      text = `${wantedLabel} is full. The next available pickup is ${offer.when}. Would you like that?`;
+    }
+    return { ok: false, reason: 'BEYOND_HORIZON', capacityState: cap.state, alternatives: [offer], text };
+  }
+
+  return success(available[0], p, false);
+}
+
+function success(slot: Slot, p: SlotPlan, requested: boolean): SlotAllocation {
+  const cap = p.capacity;
+  const busyPrefix = cap.state === 'VERY_BUSY' ? `We're very busy right now, so ` : cap.state === 'BUSY' ? `We're busy right now, so ` : '';
+  const closedPrefix = !p.kitchenOpenNow ? `We're closed right now, so ` : '';
   return {
-    ok: true, slot, prepMinutes,
-    // Promise the END of the slot: under-promise, over-deliver.
+    ok: true, slot, prepMinutes: p.prepMinutes,
     promisedReadyAt: slot.end,
     capacityState: cap.state,
     text: requested
-      ? `Pickup at ${slot.label} works.`
-      : `${busyPrefix}the earliest pickup for this order is ${slot.label}.`,
+      ? `Pickup at ${slot.when} works.`
+      : `${closedPrefix || busyPrefix}the earliest pickup for this order is ${slot.when}.`.replace(/^the/, 'The'),
   };
 }
 
@@ -288,42 +415,44 @@ function success(slot: Slot, prepMinutes: number, cap: LocationCapacity, request
 
 /**
  * "around 8", "at 8:30 pm", "in 30 minutes", "8 baje".
- * Returns null when the customer did not ask for a time — do NOT guess one.
+ * Only numbers attached to a time cue are read: "2 chicken biryani ... around 8"
+ * means 8 o'clock, never 2 o'clock. Returns null when no time was asked for —
+ * the system never guesses one.
  */
 export function parseRequestedTime(text: string, now: Date, timezone: string): Date | null {
-  const t = text.toLowerCase();
+  const t = text.toLowerCase().replace(/\bfor\s+\d{1,3}\s*(?:people|persons|pax|guests|ppl)\b/g, ' ');
 
-  const inMinutes = t.match(/\bin\s+(\d{1,3})\s*(min|mins|minutes?)\b/);
-  if (inMinutes) return addMinutes(now, Number(inMinutes[1]));
-
-  const inHours = t.match(/\bin\s+(?:an?\s+hour|1\s*(?:hr|hour))\b/);
-  if (inHours) return addMinutes(now, 60);
-
-  // "8", "8:30", "8 pm", "8.30pm", "20:15", "8 baje"
-  const clock = t.match(/\b(?:at|around|by|for)?\s*(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm|baje|bje)?\b/);
-  if (!clock) return null;
-  // Guard against matching quantities: require an explicit time cue.
-  if (!/\b(at|around|by|pick\s*(it)?\s*up|pickup|baje|am|pm|o'?clock)\b/.test(t)) return null;
-
-  let hour = Number(clock[1]);
-  const minute = clock[2] ? Number(clock[2]) : 0;
-  const suffix = clock[3];
-
-  if (hour > 23 || minute > 59) return null;
-  if (suffix === 'pm' && hour < 12) hour += 12;
-  if (suffix === 'am' && hour === 12) hour = 0;
-
-  const local = localParts(now, timezone);
-  // No am/pm given: pick whichever reading is in the future (people say "8" at 6pm meaning 8pm).
-  if (!suffix && hour <= 12) {
-    const asPm = hour < 12 ? hour + 12 : hour;
-    if (asPm * 60 + minute > local.minuteOfDay) hour = asPm;
+  const rel = t.match(/\bin\s+(\d{1,3}|an?|one|half an?)\s*(min(?:ute)?s?|hours?|hrs?)\b/);
+  if (rel) {
+    const n = /^\d/.test(rel[1]) ? Number(rel[1]) : rel[1].startsWith('half') ? 0.5 : 1;
+    return addMinutes(now, /^h/.test(rel[2]) ? Math.round(n * 60) : n);
   }
 
-  const targetMinute = hour * 60 + minute;
-  let deltaMinutes = targetMinute - local.minuteOfDay;
-  if (deltaMinutes < -120) deltaMinutes += 1440;   // clearly tomorrow
-  if (deltaMinutes < 0) return null;               // in the past today
+  const m =
+    t.match(/\b(\d{1,2})(?:[:.](\d{2}))?\s*(a\.?m\.?|p\.?m\.?)(?![a-z])/) ??
+    t.match(/\b(\d{1,2})(?:[:.](\d{2}))?\s*(?:baje|bje|o'?clock)\b/) ??
+    t.match(/(?:\bat|\baround|\bby|\bafter|\btill|\buntil|@)\s*(\d{1,2})(?:[:.](\d{2}))?\b(?!\s*(?:people|persons|pax|min|mins|minutes|hours?|x\b))/) ??
+    t.match(/\b(\d{1,2})[:.](\d{2})\b/);
+  if (!m) return null;
 
-  return addMinutes(now, deltaMinutes);
+  const hour = Number(m[1]);
+  const minute = m[2] ? Number(m[2]) : 0;
+  const suffix = (m[3] ?? '').replace(/\./g, '');
+  if (hour > 23 || minute > 59) return null;
+
+  // Anchor to the whole minute: "around 8" means 8:00:00, not 8:00 plus however
+  // many seconds past the minute it happens to be (which rounded up a slot).
+  now = new Date(Math.floor(now.getTime() / 60_000) * 60_000);
+  const local = localParts(now, timezone);
+  let candidates: number[];
+  if (suffix === 'pm') candidates = [(hour % 12) + 12];
+  else if (suffix === 'am') candidates = [hour % 12];
+  else if (hour >= 13 || hour === 0) candidates = [hour];
+  else candidates = hour === 12 ? [12] : [hour, hour + 12];   // "8" could be 8 AM or 8 PM
+
+  const deltas = candidates.map((h) => h * 60 + minute - local.minuteOfDay);
+  const future = deltas.filter((d) => d >= 0).sort((a, b) => a - b);
+  if (future.length) return addMinutes(now, future[0]);
+  if (deltas.some((d) => d >= -120)) return null;                 // just passed: not a booking
+  return addMinutes(now, Math.min(...deltas) + 1440);             // clearly means tomorrow
 }

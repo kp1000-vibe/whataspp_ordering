@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { requireScope, errorResponse, json } from '../../../server/http';
-import { listConversations, recentMessages, setHandledBy, recordOutbound } from '../../../server/conversations/service';
+import { requireScope, errorResponse, json, readJson } from '../../../server/http';
+import { listConversations, recentMessages, setHandledBy, recordOutbound, getConversation } from '../../../server/conversations/service';
+import { NotFoundError } from '../../../server/errors';
 import { messagingFor } from '../../../server/messaging/registry';
 import { getDb } from '../../../db/client';
 import { customers } from '../../../db/schema';
@@ -49,9 +50,11 @@ export async function GET(request: Request): Promise<NextResponse> {
 export async function POST(request: Request): Promise<NextResponse> {
   try {
     const { scope, user } = await requireScope();
-    const body = await request.json();
+    const body = await readJson(request);
     const conversationId = String(body.conversationId ?? '');
     if (!conversationId) return json({ error: 'conversationId is required.' }, 400);
+    // Another restaurant's conversation id is indistinguishable from a missing one.
+    if (!(await getConversation(scope, conversationId))) throw new NotFoundError('Conversation not found.');
 
     if (body.action === 'takeover' || body.action === 'release') {
       await setHandledBy(scope, conversationId, body.action === 'takeover' ? 'STAFF' : 'AI', user.userId);

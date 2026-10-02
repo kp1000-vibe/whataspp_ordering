@@ -139,6 +139,11 @@ export async function handleInboundMessage(
   let text = payload.text;
   let transcriptionConfidence: number | undefined;
 
+  if (payload.kind === 'IMAGE') {
+    await sendReply(scope, payload, `Thanks for the photo! I can't read pictures yet — please type your order (for example "2 chicken biryani and 1 coke").`);
+    return;
+  }
+
   if (payload.kind === 'AUDIO' && payload.mediaId) {
     const provider = await messagingFor(payload.restaurantId);
     const media = await provider.downloadMedia(payload.mediaId);

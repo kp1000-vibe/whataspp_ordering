@@ -7,7 +7,7 @@
  * no price field at all. That is the structural guarantee, not a convention.
  */
 import { getMenu, type ResolvedItem } from '../menu/service';
-import { applyBps } from '../../lib/money';
+import { applyBps, formatCents } from '../../lib/money';
 import { evaluateBestPromotion, type PricedLine, type PromotionRow } from '../promotions/engine';
 import type { TenantScope } from '../tenancy';
 
@@ -64,7 +64,7 @@ export type PricingContext = {
   promoCode?: string | null;
 };
 
-const MAX_QTY_PER_LINE = 50;
+export const MAX_QTY_PER_LINE = 50;
 
 export async function priceOrder(
   scope: TenantScope, specs: LineSpec[], ctx: PricingContext,
@@ -182,7 +182,7 @@ export async function priceOrder(
 }
 
 /** Human-readable issue text used in WhatsApp replies and the console. */
-export function describeIssue(issue: PricingIssue): string {
+export function describeIssue(issue: PricingIssue, currency = 'USD'): string {
   switch (issue.kind) {
     case 'UNKNOWN_ITEM': return `I could not find that item on the menu.`;
     case 'ITEM_UNAVAILABLE':
@@ -194,8 +194,9 @@ export function describeIssue(issue: PricingIssue): string {
     case 'MISSING_REQUIRED_CHOICE':
       return `For the ${issue.itemName}, which ${issue.groupName.toLowerCase()} would you like? ${issue.options.join(' or ')}.`;
     case 'TOO_MANY_SELECTIONS': return `You can pick at most ${issue.maxSelect} for ${issue.groupName}.`;
-    case 'INVALID_QUANTITY': return `That quantity is not valid.`;
-    case 'BELOW_MINIMUM': return `Minimum order is ${(issue.minOrderCents / 100).toFixed(2)}.`;
+    case 'INVALID_QUANTITY':
+      return `We can take up to ${MAX_QTY_PER_LINE} of one item per order — for more, please contact the restaurant directly.`;
+    case 'BELOW_MINIMUM': return `Our minimum order is ${formatCents(issue.minOrderCents, currency)} — would you like to add something?`;
     case 'ABOVE_MAXIMUM': return `That order is above our online maximum. Please call the restaurant.`;
   }
 }

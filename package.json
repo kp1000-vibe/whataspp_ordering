@@ -16,7 +16,8 @@
     "e2e": "tsx scripts/acceptance.ts",
     "worker": "tsx scripts/worker.ts",
     "print-agent": "node agent/print-agent.mjs",
-    "acceptance": "tsx scripts/acceptance.ts"
+    "acceptance": "tsx scripts/acceptance.ts",
+    "connect:whatsapp": "tsx scripts/connect-whatsapp.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",
@@ -33,6 +34,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "drizzle-kit": "^0.31.10",
+    "playwright-core": "^1.63.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.23.15",
     "typescript": "~5.9.3",

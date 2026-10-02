@@ -1,0 +1,28 @@
+{
+  "checkedAt": "2026-10-01T20:42:37.586730Z",
+  "changedFiles": [
+    {
+      "file": "ui.eval.ts",
+      "reason": "HARNESS ONLY. simulatorSend() passed regex.source into the page but dropped regex.flags, silently making /regular|spicy/i case-sensitive (U03). No expected value or assertion changed."
+    },
+    {
+      "file": "fixtures.ts",
+      "reason": "HARNESS ONLY. repliesDuring() now waits for the job queue to be idle before reading replies. Under concurrency another caller's drain() processed this customer's job, so replies were read too early (B12). No expected value changed."
+    }
+  ],
+  "unchangedExpectationFiles": [
+    "nlu.eval.ts",
+    "conversation.eval.ts",
+    "business.eval.ts",
+    "http.eval.ts",
+    "harness.ts",
+    "http-client.ts",
+    "time.ts"
+  ],
+  "notes": [
+    "Before the baseline was frozen: removed one meaningless \"sanity\" assertion from B21 that could fail for reasons unrelated to the product, and fixed the runner (run.ts) dropping the first suite name.",
+    "CV05 passed at baseline by accident (old code ADDED a coke: 2+1 happened to equal 3). It was left untouched; stricter cases S-CV05b/c/d were added in supplemental.eval.ts after the baseline and are reported separately.",
+    "Test fixtures (not product behaviour): the in-process world opens the demo restaurant 11:00-23:00 every day and pins the clock to 19:00 IST; closed-hours cases B01-B05 set their own hours and times.",
+    "Added after the baseline, from reviewing screenshots (not from any baseline eval): S-W01/S-W02 (a pickup time the customer never asked for was described as \"works\") and S-U17c (U17 had measured mobile overflow on a half-loaded page). Supplemental suites are reported separately and are not counted against the baseline."
+  ]
+}

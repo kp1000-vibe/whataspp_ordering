@@ -22,3 +22,9 @@ next-env.d.ts
 *.log
 coverage/
 kot-output.txt
+
+# eval artefacts regenerated on every run
+evals/results/*.json
+!evals/results/baseline/
+evals/results/report.html
+!evals/results/integrity.json

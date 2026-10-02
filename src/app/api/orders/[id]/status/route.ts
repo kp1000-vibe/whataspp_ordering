@@ -1,43 +1,44 @@
 import { NextResponse } from 'next/server';
-import { requireScope, errorResponse, json } from '../../../../../server/http';
-import { transition, cancelOrder } from '../../../../../server/orders/service';
+import { requireScope, errorResponse, json, readJson } from '../../../../../server/http';
+import { transition, cancelOrder, getOrder } from '../../../../../server/orders/service';
 import { delayOrder } from '../../../../../server/notifications/customer';
 import { bootstrap } from '../../../../../server/bootstrap';
 import { drain } from '../../../../../server/queue/queue';
-import type { OrderStatus } from '../../../../../server/orders/state-machine';
+import { ORDER_STATUSES, type OrderStatus } from '../../../../../server/orders/state-machine';
+import { ValidationError, NotFoundError } from '../../../../../server/errors';
 
 export const runtime = 'nodejs';
 
-export async function PATCH(
-  request: Request,
-  context: { params: Promise<{ id: string }> },
-): Promise<NextResponse> {
+export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   bootstrap();
   try {
     const { scope, user } = await requireScope();
     const { id } = await context.params;
-    const body = await request.json();
+    const body = await readJson(request);
+    if (!(await getOrder(scope, id))) throw new NotFoundError('Order not found.');
 
-    // "Running late" is a first-class action, not a silent field edit:
-    // it always messages the customer.
+    // "Running late" is a first-class action, not a silent field edit: it always messages the customer.
     if (body.action === 'delay') {
-      const result = await delayOrder(scope, id, Number(body.minutes ?? 15), String(body.reason ?? ''));
+      const minutes = Number(body.minutes ?? 15);
+      if (!Number.isInteger(minutes) || minutes < 1 || minutes > 180) throw new ValidationError('minutes must be 1-180.');
+      const result = await delayOrder(scope, id, minutes, String(body.reason ?? ''));
       await drain();
       return json({ ok: true, newReadyAt: result.newReadyAt });
     }
 
-    if (body.status === 'CANCELLED') {
-      const result = await cancelOrder(
-        scope, id, { type: 'STAFF', id: user.userId }, String(body.reason ?? 'cancelled by restaurant'));
+    const status = String(body.status ?? '');
+    if (!(ORDER_STATUSES as readonly string[]).includes(status)) {
+      throw new ValidationError(`Unknown status "${status}".`);
+    }
+
+    if (status === 'CANCELLED') {
+      const result = await cancelOrder(scope, id, { type: 'STAFF', id: user.userId }, String(body.reason ?? 'cancelled by restaurant'));
       await drain();
       return result.ok ? json({ ok: true, order: result.order }) : json({ error: result.reason }, 409);
     }
 
     const order = await transition(scope, {
-      orderId: id,
-      to: String(body.status) as OrderStatus,
-      actor: { type: 'STAFF', id: user.userId },
-      reason: String(body.reason ?? ''),
+      orderId: id, to: status as OrderStatus, actor: { type: 'STAFF', id: user.userId }, reason: String(body.reason ?? ''),
     });
     await drain();
     return json({ ok: true, order });

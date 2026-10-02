@@ -1,0 +1,945 @@
+{
+  "suite": "http",
+  "ranAt": "2026-09-24T07:18:22.932Z",
+  "total": 40,
+  "passed": 19,
+  "failed": 21,
+  "results": [
+    {
+      "suite": "http",
+      "id": "H00",
+      "title": "server reachable; owner and kitchen can sign in",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "login page served",
+          "expected": 200,
+          "actual": 200
+        },
+        {
+          "ok": true,
+          "label": "owner signs in",
+          "expected": 200,
+          "actual": 200
+        },
+        {
+          "ok": true,
+          "label": "kitchen signs in",
+          "expected": 200,
+          "actual": 200
+        },
+        {
+          "ok": true,
+          "label": "fixtures created"
+        }
+      ],
+      "ms": 2234
+    },
+    {
+      "suite": "http",
+      "id": "HA01",
+      "title": "every protected API refuses anonymous requests with 401",
+      "pass": false,
+      "checks": [
+        {
+          "ok": true,
+          "label": "GET /api/orders",
+          "expected": 401,
+          "actual": 401
+        },
+        {
+          "ok": true,
+          "label": "GET /api/menu",
+          "expected": 401,
+          "actual": 401
+        },
+        {
+          "ok": true,
+          "label": "GET /api/customers",
+          "expected": 401,
+          "actual": 401
+        },
+        {
+          "ok": true,
+          "label": "GET /api/analytics",
+          "expected": 401,
+          "actual": 401
+        },
+        {
+          "ok": true,
+          "label": "GET /api/capacity",
+          "expected": 401,
+          "actual": 401
+        },
+        {
+          "ok": true,
+          "label": "GET /api/conversations",
+          "expected": 401,
+          "actual": 401
+        },
+        {
+          "ok": true,
+          "label": "GET /api/printers",
+          "expected": 401,
+          "actual": 401
+        },
+        {
+          "ok": false,
+          "label": "GET /api/me",
+          "expected": 401,
+          "actual": 404
+        }
+      ],
+      "ms": 900
+    },
+    {
+      "suite": "http",
+      "id": "HA02",
+      "title": "wrong password → 401 with a generic message",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "status",
+          "expected": 401,
+          "actual": 401
+        },
+        {
+          "ok": true,
+          "label": "does not reveal whether the email exists",
+          "expected": "Invalid email or password.",
+          "actual": "Invalid email or password."
+        }
+      ],
+      "ms": 71
+    },
+    {
+      "suite": "http",
+      "id": "HA03",
+      "title": "email is case-insensitive; session cookie is HttpOnly",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "signs in",
+          "expected": 200,
+          "actual": 200
+        },
+        {
+          "ok": true,
+          "label": "cookie is HttpOnly",
+          "expected": "httponly",
+          "actual": "tt_session=8czyowhcjkvcgm5exdw-hfpwg_i14ebpgb5uklxvyue; path=/; expires=sat, 24 oct 2026 07:18:16 gmt; max-age=2592000; httponly; samesite=lax;tt_restaurant=rst_irud8dapw9kczytk; path=/; expires=sat, 24 oct 2026 07:18:16 gmt; max-age=2592000; httponly; samesite=lax"
+        }
+      ],
+      "ms": 93
+    },
+    {
+      "suite": "http",
+      "id": "HA04",
+      "title": "sign-out kills the session server-side",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "old token no longer works",
+          "expected": 401,
+          "actual": 401
+        }
+      ],
+      "ms": 436
+    },
+    {
+      "suite": "http",
+      "id": "HA05",
+      "title": "forged session cookie → 401",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "status",
+          "expected": 401,
+          "actual": 401
+        }
+      ],
+      "ms": 54
+    },
+    {
+      "suite": "http",
+      "id": "HA06",
+      "title": "weak password at signup → 400 (validation, not 401)",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "status",
+          "expected": 400,
+          "actual": 401
+        }
+      ],
+      "ms": 265
+    },
+    {
+      "suite": "http",
+      "id": "HA07",
+      "title": "duplicate email at signup → 409",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "status",
+          "expected": 409,
+          "actual": 401
+        }
+      ],
+      "ms": 13
+    },
+    {
+      "suite": "http",
+      "id": "HR01",
+      "title": "kitchen can see and move orders",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "list orders",
+          "expected": 200,
+          "actual": 200
+        },
+        {
+          "ok": true,
+          "label": "accept order",
+          "expected": 200,
+          "actual": 200
+        }
+      ],
+      "ms": 1201
+    },
+    {
+      "suite": "http",
+      "id": "HR02",
+      "title": "kitchen cannot pause the restaurant, change the menu, settings, printers or customers",
+      "pass": false,
+      "checks": [
+        {
+          "ok": true,
+          "label": "pause",
+          "expected": 403,
+          "actual": 403
+        },
+        {
+          "ok": true,
+          "label": "sold out",
+          "expected": 403,
+          "actual": 403
+        },
+        {
+          "ok": false,
+          "label": "add item",
+          "expected": 403,
+          "actual": 404
+        },
+        {
+          "ok": false,
+          "label": "settings",
+          "expected": 403,
+          "actual": 404
+        },
+        {
+          "ok": true,
+          "label": "printers",
+          "expected": 403,
+          "actual": 403
+        },
+        {
+          "ok": false,
+          "label": "erase customer",
+          "expected": 403,
+          "actual": 404
+        }
+      ],
+      "ms": 552
+    },
+    {
+      "suite": "http",
+      "id": "HT00",
+      "title": "tenant B signs up",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "signup",
+          "expected": 200,
+          "actual": 200
+        }
+      ],
+      "ms": 107
+    },
+    {
+      "suite": "http",
+      "id": "HT01",
+      "title": "B sees none of A's orders, customers or chats",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "orders",
+          "expected": 0,
+          "actual": 0
+        },
+        {
+          "ok": true,
+          "label": "customers",
+          "expected": 0,
+          "actual": 0
+        },
+        {
+          "ok": true,
+          "label": "A's transcript",
+          "expected": 0,
+          "actual": 0
+        }
+      ],
+      "ms": 97
+    },
+    {
+      "suite": "http",
+      "id": "HT02",
+      "title": "B cannot move A's order",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "status",
+          "expected": 404,
+          "actual": 404
+        },
+        {
+          "ok": true,
+          "label": "A's order untouched",
+          "expected": "ACCEPTED",
+          "actual": "ACCEPTED"
+        }
+      ],
+      "ms": 218
+    },
+    {
+      "suite": "http",
+      "id": "HT03",
+      "title": "B cannot mark A's item sold out",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "status",
+          "expected": 404,
+          "actual": 200
+        },
+        {
+          "ok": true,
+          "label": "A's item still available",
+          "expected": "AVAILABLE",
+          "actual": "AVAILABLE"
+        }
+      ],
+      "ms": 90
+    },
+    {
+      "suite": "http",
+      "id": "HT04",
+      "title": "B cannot pause A's location",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "status",
+          "expected": 404,
+          "actual": 500
+        },
+        {
+          "ok": true,
+          "label": "A still open",
+          "expected": "OPEN",
+          "actual": "OPEN"
+        }
+      ],
+      "ms": 77
+    },
+    {
+      "suite": "http",
+      "id": "HT05",
+      "title": "B cannot take over A's chat",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "status",
+          "expected": 404,
+          "actual": 200
+        },
+        {
+          "ok": true,
+          "label": "still AI",
+          "expected": "AI",
+          "actual": "AI"
+        }
+      ],
+      "ms": 62
+    },
+    {
+      "suite": "http",
+      "id": "HT06",
+      "title": "switching the restaurant cookie to A's id does not grant access",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "no A orders",
+          "expected": 0,
+          "actual": 0
+        }
+      ],
+      "ms": 106
+    },
+    {
+      "suite": "http",
+      "id": "HT07",
+      "title": "B cannot reprint or erase A's data",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "reprint",
+          "expected": 404,
+          "actual": 404
+        },
+        {
+          "ok": true,
+          "label": "erase",
+          "expected": 404,
+          "actual": 404
+        }
+      ],
+      "ms": 142
+    },
+    {
+      "suite": "http",
+      "id": "HV01",
+      "title": "malformed JSON → 400, not 500",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "status",
+          "expected": 400,
+          "actual": 500
+        }
+      ],
+      "ms": 34
+    },
+    {
+      "suite": "http",
+      "id": "HV02",
+      "title": "unknown order status → 400",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "status",
+          "expected": 400,
+          "actual": 409
+        }
+      ],
+      "ms": 36
+    },
+    {
+      "suite": "http",
+      "id": "HV03",
+      "title": "illegal transition (ACCEPTED → PICKED_UP) → 409",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "status",
+          "expected": 409,
+          "actual": 409
+        }
+      ],
+      "ms": 35
+    },
+    {
+      "suite": "http",
+      "id": "HS01",
+      "title": "security headers on pages and APIs",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "/login nosniff",
+          "expected": "nosniff",
+          "actual": null
+        },
+        {
+          "ok": false,
+          "label": "/login cannot be framed",
+          "actual": ""
+        },
+        {
+          "ok": false,
+          "label": "/login referrer-policy"
+        },
+        {
+          "ok": false,
+          "label": "/api/orders nosniff",
+          "expected": "nosniff",
+          "actual": null
+        },
+        {
+          "ok": false,
+          "label": "/api/orders cannot be framed",
+          "actual": ""
+        },
+        {
+          "ok": false,
+          "label": "/api/orders referrer-policy"
+        }
+      ],
+      "ms": 74
+    },
+    {
+      "suite": "http",
+      "id": "HS02",
+      "title": "cross-site POST with a valid session cookie is refused (CSRF)",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "status",
+          "expected": 403,
+          "actual": 200
+        },
+        {
+          "ok": false,
+          "label": "not paused",
+          "expected": "OPEN",
+          "actual": "PAUSED"
+        }
+      ],
+      "ms": 70
+    },
+    {
+      "suite": "http",
+      "id": "HS03",
+      "title": "same-origin POST works",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "status",
+          "expected": 200,
+          "actual": 200
+        }
+      ],
+      "ms": 29
+    },
+    {
+      "suite": "http",
+      "id": "HW01",
+      "title": "Meta's verification handshake",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "right token",
+          "expected": 200,
+          "actual": 200
+        },
+        {
+          "ok": true,
+          "label": "echoes challenge",
+          "expected": "abc123",
+          "actual": "abc123"
+        },
+        {
+          "ok": true,
+          "label": "wrong token",
+          "expected": 403,
+          "actual": 403
+        }
+      ],
+      "ms": 290
+    },
+    {
+      "suite": "http",
+      "id": "HW02",
+      "title": "signature is enforced",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "unsigned",
+          "expected": 401,
+          "actual": 401
+        },
+        {
+          "ok": true,
+          "label": "bad signature",
+          "expected": 401,
+          "actual": 401
+        },
+        {
+          "ok": true,
+          "label": "tampered body",
+          "expected": 401,
+          "actual": 401
+        },
+        {
+          "ok": true,
+          "label": "valid",
+          "expected": 200,
+          "actual": 200
+        },
+        {
+          "ok": true,
+          "label": "the signed message was processed and answered",
+          "expected": "Here's your order",
+          "actual": "Here's your order:\n• 2 x Coke — ₹120.00\n• 1 x Garlic Naan — ₹70.00\n\nSubtotal: ₹190.00\nTax: ₹9.50\nTotal: ₹199.50\n\nthe earliest pickup for this order is 7:30 PM.\nShall I confirm?"
+        }
+      ],
+      "ms": 253
+    },
+    {
+      "suite": "http",
+      "id": "HW03",
+      "title": "malformed webhook JSON → 400",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "status",
+          "expected": 400,
+          "actual": 400
+        }
+      ],
+      "ms": 16
+    },
+    {
+      "suite": "http",
+      "id": "HW04",
+      "title": "webhook for an unknown business number is acknowledged and ignored",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "acknowledged so Meta stops retrying",
+          "expected": 200,
+          "actual": 200
+        }
+      ],
+      "ms": 14
+    },
+    {
+      "suite": "http",
+      "id": "HP01",
+      "title": "print agent: bad token refused; good token claims and reports",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "bad token",
+          "expected": 401,
+          "actual": 401
+        },
+        {
+          "ok": true,
+          "label": "good token",
+          "expected": 200,
+          "actual": 200
+        },
+        {
+          "ok": true,
+          "label": "the accepted order has a KOT waiting",
+          "expected": ">= 1",
+          "actual": 1
+        },
+        {
+          "ok": true,
+          "label": "result accepted",
+          "expected": 200,
+          "actual": 200
+        }
+      ],
+      "ms": 201
+    },
+    {
+      "suite": "http",
+      "id": "HN01",
+      "title": "/api/me tells the console the currency and timezone",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "status",
+          "expected": 200,
+          "actual": 404
+        },
+        {
+          "ok": false,
+          "label": "currency",
+          "expected": "INR"
+        },
+        {
+          "ok": false,
+          "label": "timezone",
+          "expected": "Asia/Kolkata"
+        }
+      ],
+      "ms": 51
+    },
+    {
+      "suite": "http",
+      "id": "HN02",
+      "title": "reprint a KOT over the API",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "status",
+          "expected": 200,
+          "actual": 404
+        },
+        {
+          "ok": false,
+          "label": "job queued",
+          "expected": ">= 1",
+          "actual": 0
+        }
+      ],
+      "ms": 102
+    },
+    {
+      "suite": "http",
+      "id": "HN03",
+      "title": "running late over the API moves the promise",
+      "pass": true,
+      "checks": [
+        {
+          "ok": true,
+          "label": "status",
+          "expected": 200,
+          "actual": 200
+        },
+        {
+          "ok": true,
+          "label": "moved 15 min",
+          "expected": 900000,
+          "actual": 900000
+        }
+      ],
+      "ms": 162
+    },
+    {
+      "suite": "http",
+      "id": "HN04",
+      "title": "erase a customer (GDPR) over the API",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "status",
+          "expected": 200,
+          "actual": 404
+        },
+        {
+          "ok": false,
+          "label": "no longer findable by phone",
+          "expected": 0,
+          "actual": 1
+        }
+      ],
+      "ms": 374
+    },
+    {
+      "suite": "http",
+      "id": "HO01",
+      "title": "new US restaurant signs up (USD, Los Angeles)",
+      "pass": false,
+      "checks": [
+        {
+          "ok": true,
+          "label": "signup",
+          "expected": 200,
+          "actual": 200
+        },
+        {
+          "ok": false,
+          "label": "currency stored",
+          "expected": "USD"
+        }
+      ],
+      "ms": 177
+    },
+    {
+      "suite": "http",
+      "id": "HO02",
+      "title": "sets opening hours",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "saved",
+          "expected": 200,
+          "actual": 404
+        },
+        {
+          "ok": false,
+          "label": "all 7 days read back",
+          "expected": 7,
+          "actual": 0
+        }
+      ],
+      "ms": 169
+    },
+    {
+      "suite": "http",
+      "id": "HO03",
+      "title": "adds menu items one by one",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "create Classic Burger",
+          "expected": 201,
+          "actual": 404
+        },
+        {
+          "ok": false,
+          "label": "create Fries",
+          "expected": 201,
+          "actual": 404
+        },
+        {
+          "ok": false,
+          "label": "price stored in cents",
+          "expected": 1299
+        }
+      ],
+      "ms": 134
+    },
+    {
+      "suite": "http",
+      "id": "HO04",
+      "title": "CSV import validates before publishing",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "invalid file rejected",
+          "expected": false
+        },
+        {
+          "ok": false,
+          "label": "errors point at lines 3 and 4",
+          "expected": [
+            3,
+            4
+          ],
+          "actual": []
+        },
+        {
+          "ok": true,
+          "label": "nothing published from an invalid file",
+          "expected": false,
+          "actual": false
+        }
+      ],
+      "ms": 83
+    },
+    {
+      "suite": "http",
+      "id": "HO05",
+      "title": "a valid CSV imports",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "valid",
+          "expected": true
+        },
+        {
+          "ok": false,
+          "label": "two items created",
+          "expected": 2
+        }
+      ],
+      "ms": 108
+    },
+    {
+      "suite": "http",
+      "id": "HO06",
+      "title": "configures prep time and pickup capacity",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "saved",
+          "expected": 200,
+          "actual": 404
+        },
+        {
+          "ok": false,
+          "label": "slot length",
+          "expected": 10,
+          "actual": 15
+        },
+        {
+          "ok": false,
+          "label": "orders per slot",
+          "expected": 5,
+          "actual": 8
+        }
+      ],
+      "ms": 80
+    },
+    {
+      "suite": "http",
+      "id": "HO07",
+      "title": "takes a test order in dollars and hands it to the kitchen",
+      "pass": false,
+      "checks": [
+        {
+          "ok": false,
+          "label": "reply contains Classic Burger",
+          "expected": "Classic Burger",
+          "actual": "Our hours are not set up yet — please contact the restaurant."
+        },
+        {
+          "ok": false,
+          "label": "reply contains $",
+          "expected": "$",
+          "actual": "Our hours are not set up yet — please contact the restaurant."
+        },
+        {
+          "ok": true,
+          "label": "reply does not contain ₹",
+          "expected": "not ₹",
+          "actual": "Our hours are not set up yet — please contact the restaurant."
+        },
+        {
+          "ok": false,
+          "label": "reply contains /Confirmed/i",
+          "expected": "/Confirmed/i",
+          "actual": "I don't have an order ready to confirm yet. What would you like?"
+        },
+        {
+          "ok": false,
+          "label": "order is in the new restaurant console",
+          "expected": 1,
+          "actual": 0
+        }
+      ],
+      "ms": 157
+    }
+  ]
+}

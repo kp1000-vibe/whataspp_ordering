@@ -207,17 +207,50 @@ export async function removeTag(scope: TenantScope, customerId: string, tag: str
   ));
 }
 
-/** GDPR/CCPA erasure: wipes identifiers, keeps anonymised order facts for accounting. */
+/**
+ * GDPR/CCPA erasure. Wipes the customer's identifiers EVERYWHERE they were
+ * copied — not just the customers row. Kitchen tickets, the event log and the
+ * job queue all held copies of the name or phone (found by eval B20).
+ * Anonymised order facts (items, totals) are kept for accounting.
+ */
 export async function eraseCustomer(scope: TenantScope, customerId: string): Promise<void> {
   const db = await getDb();
+  const [c] = await db.drizzle.select().from(customers).where(
+    and(eq(customers.restaurantId, scope.restaurantId), eq(customers.id, customerId))).limit(1);
+  if (!c) {
+    const { NotFoundError } = await import('../errors');
+    throw new NotFoundError('Customer not found.');
+  }
+  const phoneDigits = c.phoneE164.replace(/\D/g, '');
+  const name = c.name ?? '';
+
   await db.drizzle.update(customers).set({
     phoneE164: `erased:${customerId}`, name: null, notes: '', updatedAt: new Date(),
-  }).where(and(eq(customers.restaurantId, scope.restaurantId), eq(customers.id, customerId)));
+  }).where(eq(customers.id, customerId));
 
+  const convIds = `SELECT id FROM conversations WHERE restaurant_id = $1 AND customer_id = $2`;
+  const orderIds = `SELECT id FROM orders WHERE restaurant_id = $1 AND customer_id = $2`;
+
+  await db.execute(`UPDATE conversation_messages SET body = '[erased]', media_url = NULL WHERE conversation_id IN (${convIds});`, [scope.restaurantId, customerId]);
+  await db.execute(`UPDATE conversations SET state = '{}'::jsonb WHERE id IN (${convIds});`, [scope.restaurantId, customerId]);
   await db.execute(
-    `UPDATE conversation_messages SET body = '[erased]'
-     WHERE conversation_id IN (SELECT id FROM conversations WHERE customer_id = $1);`,
-    [customerId],
-  );
+    `UPDATE print_jobs SET payload = regexp_replace(regexp_replace(payload, 'CUSTOMER: [^\n]*', 'CUSTOMER: [erased]', 'g'), 'PHONE: [^\n]*', 'PHONE: [erased]', 'g')
+     WHERE order_id IN (${orderIds});`, [scope.restaurantId, customerId]);
+  await db.execute(
+    `UPDATE voice_messages SET transcript = '[erased]' WHERE conversation_message_id IN
+       (SELECT id FROM conversation_messages WHERE conversation_id IN (${convIds}));`, [scope.restaurantId, customerId]);
+
+  // Event log and job queue: redact any record that mentions this customer.
+  const like = [`%${customerId}%`, phoneDigits ? `%${phoneDigits}%` : '%__never__%', name ? `%${name}%` : '%__never__%'];
+  for (const table of ['domain_events', 'jobs']) {
+    await db.execute(
+      `UPDATE ${table} SET payload = jsonb_build_object('redacted', true, 'reason', 'erasure_request')
+       WHERE payload::text LIKE $1 OR payload::text LIKE $2 OR payload::text LIKE $3;`, like);
+  }
+  await db.execute(
+    `UPDATE audit_logs SET before = NULL, after = NULL
+     WHERE restaurant_id = $1 AND (before::text LIKE $2 OR after::text LIKE $2 OR before::text LIKE $3 OR after::text LIKE $3);`,
+    [scope.restaurantId, like[1], like[2]]);
+
   await setMarketingConsent(scope, customerId, 'OPTED_OUT', 'erasure_request');
 }

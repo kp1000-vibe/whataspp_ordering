@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server';
-import { requireScope, errorResponse, json } from '../../../server/http';
+import { requireScope, errorResponse, json, readJson } from '../../../server/http';
+import { NotFoundError } from '../../../server/errors';
+import { getDb } from '../../../db/client';
+import { locations } from '../../../db/schema';
+import { and, eq } from 'drizzle-orm';
 import { printerHealth, createPrinter } from '../../../server/printing/service';
 import { requireRole } from '../../../server/tenancy';
 
@@ -20,7 +24,11 @@ export async function POST(request: Request): Promise<NextResponse> {
   try {
     const { scope } = await requireScope();
     requireRole(scope, 'MANAGER');
-    const body = await request.json();
+    const body = await readJson(request);
+    const db = await getDb();
+    const [loc] = await db.drizzle.select().from(locations)
+      .where(and(eq(locations.restaurantId, scope.restaurantId), eq(locations.id, String(body.locationId ?? '')))).limit(1);
+    if (!loc) throw new NotFoundError('Location not found.');
 
     const result = await createPrinter(scope, {
       locationId: String(body.locationId),

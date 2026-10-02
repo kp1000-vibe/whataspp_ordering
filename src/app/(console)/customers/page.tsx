@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Card, Badge, Input, Empty, money } from '../../../components/ui';
+import { Card, Badge, Input, Empty } from '../../../components/ui';
+import { useRestaurant } from '../../../components/restaurant';
 
 type Customer = {
   id: string; name: string | null; phoneE164: string;
@@ -11,6 +12,7 @@ type Customer = {
 };
 
 export default function CustomersPage() {
+  const { money } = useRestaurant();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [query, setQuery] = useState('');
 

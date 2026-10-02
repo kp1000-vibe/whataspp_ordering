@@ -3,12 +3,12 @@
  *
  * Purpose: every test, the demo restaurant and local development run the FULL
  * ordering pipeline with zero API keys and zero network. It implements the same
- * AIProvider interface as the hosted models, so nothing downstream changes.
+ * AIProvider interface as the hosted models, so nothing downstream changes, and
+ * it is the production fallback when a hosted model errors or times out.
  *
- * It is NOT a toy: it handles quantities (digits and words), multi-item
- * utterances, modifiers, removals, negations, confirmations and the common
- * question intents. It is deliberately conservative — when unsure it returns
- * low confidence and lets the backend ask a clarifying question.
+ * It reports only what the customer SAID — phrases, quantities, modifier words,
+ * the subject of a question. Whether a dish exists, what it costs and when it
+ * can be ready are decided by the backend against the database.
  */
 import type {
   AIProvider, ChatMessage, ChatOptions, ChatResult, StructuredResult, TranscriptResult, Usage,
@@ -16,319 +16,401 @@ import type {
 import { emptyUsage } from './types';
 import { normaliseInterpretation, type Interpretation, type Intent, type ItemPhrase } from '../interpretation';
 import {
-  detectLanguage, normaliseForMatching, HINDI_CONFIRM, HINDI_DENY, HINDI_QUESTION_CUES,
-  type Language,
+  detectLanguage, normaliseForMatching, HINDI_CONFIRM, HINDI_DENY, HINDI_QUESTION_CUES, type Language,
 } from '../language';
-
-const NUMBER_WORDS: Record<string, number> = {
-  a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7,
-  eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, couple: 2, dozen: 12,
-};
-
-const MODIFIER_LEADERS = [
-  'extra', 'no', 'without', 'with', 'add', 'hold', 'light', 'double',
-  'spicy', 'mild', 'regular', 'large', 'small', 'medium', 'stuffed', 'thin', 'thick',
-];
-
-/**
- * Words that describe HOW an item is made, never WHAT the item is.
- * A clause made only of these attaches to the previous item instead of becoming
- * a phantom order line. This is what makes the canonical utterance
- * "2 chicken biryani, one spicy, 2 coke" parse the way a human hears it.
- */
-const MODIFIER_VOCAB = new Set([
-  ...MODIFIER_LEADERS,
-  'normal', 'plain', 'hot', 'less', 'more', 'half', 'full', 'well', 'done',
-  'crispy', 'soft', 'sweet', 'salt', 'salty', 'cheese', 'sauce', 'ice',
-  'the', 'one', 'other', 'another', 'rest', 'and',
-]);
-
-function isModifierOnlyPhrase(phrase: string): boolean {
-  const words = phrase.toLowerCase().split(/\s+/).filter(Boolean);
-  if (words.length === 0 || words.length > 3) return false;
-  if (!words.some((w) => MODIFIER_LEADERS.includes(w) || MODIFIER_VOCAB.has(w))) return false;
-  return words.every((w) => MODIFIER_VOCAB.has(w));
-}
-
-/** Allergen vocabulary, singular and plural, used by the guard regex below. */
-const ALLERGEN_WORDS =
-  '(?:peanuts?|nuts?|almonds?|cashews?|gluten|wheat|dairy|milk|lactose|cheese|paneer|' +
-  'shellfish|prawns?|shrimps?|crab|fish|soya?|soybeans?|eggs?|sesame|mustard|celery)';
-
-const CONFIRM_RE = /^\s*(yes|yeah|yep|yup|sure|ok|okay|confirm|confirmed|that'?s? right|correct|place it|go ahead|do it|sounds good|perfect|y)\s*[!.]*\s*$/i;
-const DENY_RE = /^\s*(no|nope|nah|not quite|wrong|incorrect|n)\s*[!.]*\s*$/i;
-
-const PATTERNS: Array<{ intent: Intent; re: RegExp }> = [
-  { intent: 'OPT_OUT', re: /\b(stop|unsubscribe|opt\s*out|remove me from|no more (offers|promos|marketing))\b/i },
-  { intent: 'OPT_IN', re: /\b(subscribe|opt\s*in|send me (offers|deals|promos))\b/i },
-  { intent: 'HUMAN_REQUEST', re: /\b(speak|talk|connect)\s+(to|with)\s+(a\s+)?(human|person|someone|staff|manager)\b|\breal person\b/i },
-  /**
-   * Allergen detection is deliberately greedy and sits ABOVE the ordering rules.
-   * A false positive costs one extra question; a false negative means an
-   * allergy question silently became an order. The regex is plural-tolerant
-   * because "peanuts" is what people actually type.
-   */
-  { intent: 'ALLERGEN_QUESTION', re: new RegExp(
-      [
-        String.raw`\ballerg\w+\b`,
-        String.raw`\b(contains?|contain|containing)\b[\s\S]*\b${ALLERGEN_WORDS}\b`,
-        String.raw`\b(does|do|is|are)\b[\s\S]*\b${ALLERGEN_WORDS}\b[\s\S]*\?`,
-        String.raw`\b${ALLERGEN_WORDS}\b[^?]*\?`,
-        String.raw`\b(gluten[- ]free|dairy[- ]free|nut[- ]free)\b`,
-      ].join('|'), 'i') },
-  { intent: 'HOURS_QUESTION', re: /\b(open|close|closing|hours|what time)\b.*\?|\bare you open\b|\bwhat are your hours\b/i },
-  { intent: 'PREP_TIME_QUESTION', re: /\bhow long\b|\bhow soon\b|\bwhen will (it|my order) be ready\b|\bready in\b/i },
-  { intent: 'ORDER_STATUS', re: /\b(where'?s|status of|track)\b.*\border\b|\bis my order ready\b|\border\s*#?\s*\d+\b.*\bstatus\b/i },
-  { intent: 'PROMO_QUESTION', re: /\b(deal|deals|special|specials|promo|promotion|discount|offer)\b/i },
-  { intent: 'ORDER_HISTORY_QUESTION', re: /\bwhat did i (order|get|have)\b|\blast time\b.*\?|\bmy (last|previous) order\b/i },
-  { intent: 'REPEAT_LAST_ORDER', re: /\b(my usual|the usual|same as last time|same again|usual please|send me my usual|repeat my last order)\b/i },
-  { intent: 'CANCEL_ORDER', re: /\bcancel\b.*\border\b|\bcancel that\b|\bnever ?mind\b|\bscrap that\b|\bforget it\b/i },
-  { intent: 'MENU_QUESTION', re: /\b(what|which|do you have|got any|any)\b.*\b(vegetarian|vegan|options?|menu|serve|sell|available)\b|\bwhat'?s on the menu\b|\bdo you (have|sell|serve)\b/i },
-  { intent: 'PRICE_QUESTION', re: /\bhow much\b|\bwhat does .* cost\b|\bprice of\b/i },
-  { intent: 'GREETING', re: /^\s*(hi|hey|hello|yo|good (morning|afternoon|evening)|namaste|hola)\b[\s!.,]*$/i },
-];
-
-const REMOVE_RE = /\b(remove|delete|take off|take out|drop|cancel|get rid of)\s+(the\s+)?(?<rest>.+)$/i;
 
 export class DeterministicProvider implements AIProvider {
   readonly name = 'deterministic';
 
   async chat(messages: ChatMessage[], _opts?: ChatOptions): Promise<ChatResult> {
-    // Copywriting is templated in the agent; this exists so the interface is complete.
-    const last = messages.at(-1)?.content ?? '';
-    return { text: last, usage: emptyUsage(this.name, 'rules-v1') };
+    return { text: messages.at(-1)?.content ?? '', usage: emptyUsage(this.name, 'rules-v2') };
   }
 
-  async structuredOutput<T>(
-    messages: ChatMessage[], _schema: Record<string, unknown>, _opts?: ChatOptions,
-  ): Promise<StructuredResult<T>> {
+  async structuredOutput<T>(messages: ChatMessage[], _schema: Record<string, unknown>, _opts?: ChatOptions): Promise<StructuredResult<T>> {
     const started = Date.now();
     const userText = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
     const value = interpret(userText) as unknown as T;
-    const usage: Usage = {
-      ...emptyUsage(this.name, 'rules-v1', Date.now() - started),
-      promptTokens: Math.ceil(userText.length / 4),
-    };
+    const usage: Usage = { ...emptyUsage(this.name, 'rules-v2', Date.now() - started), promptTokens: Math.ceil(userText.length / 4) };
     return { value, usage, raw: JSON.stringify(value) };
   }
 
   async transcribe(audio: Uint8Array, _mime: string, _hint?: string): Promise<TranscriptResult> {
-    // Mock media bytes are `fixture:<mediaId>`; the fixture table lives in stt/mock.ts.
-    const text = new TextDecoder().decode(audio);
-    return {
-      text, language: 'en', confidence: 0.9,
-      usage: emptyUsage(this.name, 'rules-v1'),
-    };
+    return { text: new TextDecoder().decode(audio), language: 'en', confidence: 0.9, usage: emptyUsage(this.name, 'rules-v2') };
   }
 
   async embed(texts: string[]) {
-    // Deterministic hashing embedding — stable, offline, good enough for nearest-neighbour smoke tests.
     const vectors = texts.map((t) => {
       const v = new Array(64).fill(0);
       for (let i = 0; i < t.length; i++) v[t.charCodeAt(i) % 64] += 1;
       const norm = Math.sqrt(v.reduce((s, x) => s + x * x, 0)) || 1;
       return v.map((x) => x / norm);
     });
-    return { vectors, usage: emptyUsage(this.name, 'rules-v1') };
+    return { vectors, usage: emptyUsage(this.name, 'rules-v2') };
   }
 }
 
-/* ────────────────────── the rules ────────────────────── */
+/* ═══════════════════════ vocabulary ═══════════════════════ */
 
-export function interpret(input: string): Interpretation {
-  const original = String(input || '').trim();
-  if (!original) return normaliseInterpretation({ intent: 'UNKNOWN', confidence: 0 });
+const NUMBER_WORDS: Record<string, number> = {
+  a: 1, an: 1, one: 1, single: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7,
+  eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, couple: 2, dozen: 12,
+};
 
-  const language: Language = detectLanguage(original);
-  // Hindi/Hinglish is folded onto the English shapes; English passes through untouched.
-  const text = language === 'en' ? original : normaliseForMatching(original);
+/** How a dish is made — never what the dish is. Longest first. */
+const DESCRIPTORS = [
+  'extra spicy', 'very spicy', 'double spicy', 'less spicy', 'medium spicy', 'mild spicy', 'not spicy',
+  'no spice', 'extra hot', 'spicy', 'regular', 'mild', 'hot', 'normal', 'medium', 'plain',
+];
+const DESCRIPTOR_TOKENS = new Set(DESCRIPTORS.flatMap((d) => d.split(' ')));
+/** "both spicy", "one spicy", "the other regular". */
+const SCOPE_WORDS = new Set(['both', 'all', 'each', 'every', 'other', 'another', 'rest', 'the', 'of', 'them', 'one']);
+const LEADERS = new Set(['extra', 'no', 'without', 'with', 'hold', 'light', 'double', 'less', 'more']);
+const UNIT_WORDS = /^(?:plates?|pcs|pieces?|nos|packets?|bottles?|cans?|glasses?|portions?|servings?|full|half)\s+/i;
 
-  if (CONFIRM_RE.test(original) || HINDI_CONFIRM.test(original)) {
-    return normaliseInterpretation({ intent: 'CONFIRM', confidence: 0.97, language });
-  }
-  if (DENY_RE.test(original) || HINDI_DENY.test(original)) {
-    return normaliseInterpretation({ intent: 'DENY', confidence: 0.95, language });
-  }
+const CONFIRM_RE = /^\s*(y|ya|yes|yeah|yep|yup|yess+|sure|ok|okay|k|kk|confirm(?:ed)?|confirm (?:it|order|my order|please)|yes,?\s*(?:please|confirm|go ahead|place it)|that'?s (?:right|correct|it)|correct|place (?:it|the order|my order)|go ahead|do it|book it|sounds good|perfect|done|👍|👌|✅|✔|🆗)\s*[!.]*\s*$/iu;
+const DENY_RE = /^\s*(no|nope|nah|not quite|wrong|incorrect|n|not yet|wait)\s*[!.]*\s*$/i;
+const GREETING_ONLY = /^\s*(hi+|hello+|hey+|hiya|yo|hola|namaste|namaskar|salaam|good\s+(?:morning|afternoon|evening|night))(?:\s+(?:there|team|all|everyone|bhai|bhaiya|sir|madam|ji))?[\s!.,🙏👋]*$/iu;
+const GREETING_PREFIX = /^\s*(?:hi+|hello+|hey+|hiya|yo|hola|namaste|namaskar|good\s+(?:morning|afternoon|evening))(?:\s+(?:there|team|bhai|bhaiya|sir|madam|ji))?[\s!.,]+/iu;
+const SMALL_TALK = /^\s*(thanks?|thank you(?: so much)?|thx|ty|ok(?:ay)?\s+(?:thanks?|thank you|cool|great)|cool|great|awesome|nice|got it|alright|shukriya|dhanyavaad|dhanyawad|🙏|😊|❤️|♥️)[\s!.]*$/iu;
 
-  if (language !== 'en') {
-    for (const cue of HINDI_QUESTION_CUES) {
-      if (cue.re.test(original)) {
-        const items = extractItems(text);
-        if (items.length && cue.intent === 'PRICE_QUESTION') {
-          return normaliseInterpretation({ intent: 'ORDER_ADD', items, confidence: 0.7, language });
-        }
-        return normaliseInterpretation({ intent: cue.intent, question: original, confidence: 0.85, language });
-      }
-    }
-  }
+const ORDER_REQUEST = /\b(?:can|could|may)\s+(?:i|we)\s+(?:get|have|order|grab)\b|\bi(?:'d| would)\s+(?:like|love)\b|\bi\s+(?:want|need)\b|\bi'?ll\s+(?:have|take)\b|\bgive me\b|\bget me\b|\bgimme\b|\bsend me\b|\bplease add\b|^\s*add\b/i;
+const INTERROGATIVE_START = /^\s*(?:is|are|was|do|does|did|can you|could you|will you|what|whats|what's|which|where|when|how|any|got any|have you got|kya)\b/i;
 
-  for (const { intent, re } of PATTERNS) {
-    if (re.test(text)) {
-      // A message can both answer a question AND order ("do you have fries? add 2")
-      const items = extractItems(text);
-      if (intent === 'GREETING' && items.length === 0) {
-        return normaliseInterpretation({ intent, confidence: 0.95, language });
-      }
-      if (['ORDER_STATUS', 'CANCEL_ORDER', 'REPEAT_LAST_ORDER', 'OPT_OUT', 'OPT_IN', 'HUMAN_REQUEST'].includes(intent)) {
-        return normaliseInterpretation({ intent, question: original, confidence: 0.9, language });
-      }
-      if (items.length > 0 && ['MENU_QUESTION', 'PROMO_QUESTION', 'PRICE_QUESTION'].includes(intent)
-          && /\b(add|want|get|give|i'?ll (have|take)|order)\b/i.test(text)) {
-        return normaliseInterpretation({ intent: 'ORDER_ADD', items, confidence: 0.75, language });
-      }
-      return normaliseInterpretation({ intent, question: original, confidence: 0.85, language });
-    }
-  }
+const PATTERNS: Array<{ intent: Intent; re: RegExp }> = [
+  { intent: 'HUMAN_REQUEST', re: /\b(?:speak|talk|chat|connect)\s+(?:to|with)\s+(?:a\s+|the\s+)?(?:human|person|someone|somebody|staff|manager|owner|agent)\b|\breal person\b|\bcan (?:a|someone|somebody)\s+(?:real\s+)?(?:person|human)\b|\bcall me\b/i },
+  { intent: 'REPEAT_LAST_ORDER', re: /\b(?:my usual|the usual|same as (?:last time|before|usual)|same again|usual please|repeat (?:my |the )?(?:last )?order|reorder|order again)\b/i },
+  { intent: 'ORDER_HISTORY_QUESTION', re: /\bwhat did i (?:order|get|have)\b|\bmy (?:last|previous) order\b(?!.*\b(?:status|ready)\b)/i },
+  { intent: 'ORDER_STATUS', re: /\b(?:where(?:'?s| is)|status|track(?:ing)?|update on|any update)\b.*\border\b|\border\b.*\b(?:status|ready|done|update)\b|\bis (?:it|my order|my food) ready\b|\bhow(?:'?s| is) my order\b/i },
+  { intent: 'CANCEL_ORDER', re: /^\s*cancel\s*[.!]*\s*$|\bcancel\s+(?:it|that|this|my order|the order|order|everything|all of it)\b|\bnever ?mind\b|\bforget it\b|\bscrap (?:it|that)\b|\bdon'?t want (?:it|anything)\b/i },
+  { intent: 'GROUP_ORDER', re: /\bfor\s+(?:\d{1,3}|two|three|four|five|six|seven|eight|nine|ten|twelve|fifteen|twenty)\s*(?:people|persons|pax|guests|of us|ppl|adults)\b|\b(?:catering|bulk order|large order|office (?:lunch|party)|party order)\b/i },
+];
 
-  const removal = text.match(REMOVE_RE);
-  if (removal?.groups?.rest) {
-    const removeItems = splitClauses(removal.groups.rest).map((c) => {
-      const { quantity, rest } = leadingQuantity(c);
-      return { phrase: stripModifierWords(rest), quantity: quantity ?? undefined };
-    }).filter((r) => r.phrase);
-    if (removeItems.length) return normaliseInterpretation({ intent: 'ORDER_REMOVE', removeItems, confidence: 0.85, language });
-  }
+/** Allergen vocabulary (dishes like paneer are NOT allergen words; dairy is). */
+const ALLERGEN_WORDS = '(?:peanuts?|nuts?|tree ?nuts?|almonds?|cashews?|gluten|wheat|dairy|milk|lactose|shellfish|prawns?|shrimps?|crab|fish|soya?|soybeans?|eggs?|sesame|mustard|celery)';
+const ALLERGEN_RE = new RegExp([
+  String.raw`\ballerg\w+\b`,
+  String.raw`\b(?:contains?|containing)\b[\s\S]*\b${ALLERGEN_WORDS}\b`,
+  String.raw`\b(?:does|do|is|are|any|has|have)\b[\s\S]*\b${ALLERGEN_WORDS}\b`,
+  String.raw`\b${ALLERGEN_WORDS}\b[^?]*\?`,
+  String.raw`\b(?:gluten|dairy|nut|lactose|egg)[- ]free\b`,
+].join('|'), 'i');
+const DIETARY_RE = /\b(?:veg|veggie|vegetarian|vegan|non[- ]?veg|jain|halal|eggless|egg[- ]free)\b/i;
 
-  const items = extractItems(text);
-  if (items.length > 0) {
-    // Confidence drops when the utterance is long relative to what we extracted.
-    const coverage = items.reduce((s, i) => s + i.phrase.length, 0) / text.length;
-    let confidence = Math.max(0.45, Math.min(0.92, 0.5 + coverage * 0.5));
+const QUESTION_WORDS = new Set([
+  'do', 'does', 'did', 'you', 'u', 'have', 'has', 'got', 'any', 'is', 'are', 'was', 'the', 'a', 'an', 'what', 'whats',
+  'which', 'how', 'much', 'many', 'for', 'of', 'in', 'there', 'your', 'price', 'cost', 'costs', 'rate', 'kitna',
+  'kitne', 'kitni', 'ka', 'ki', 'ke', 'hai', 'kya', 'available', 'serve', 'sell', 'today', 'it', 'this', 'that',
+  'can', 'i', 'we', 'get', 'tell', 'me', 'please', 'options', 'option', 'items', 'item', 'menu', 'on', 'contain',
+  'contains', 'free', 'veg', 'veggie', 'vegetarian', 'vegan', 'non', 'jain', 'halal', 'with', 'where', 'when',
+  'still', 'stock', 'left', 'some', 'something', 'dish', 'dishes',
+]);
 
-    /**
-     * A bare noun phrase with no quantity and no ordering verb is weak evidence
-     * of an order — it is just as likely to be a typo or a stray word. Without
-     * this cap, "asdkjhasd" scores 0.92 purely because it is short. Menu
-     * resolution would still reject it, but an honest confidence number is what
-     * drives clarification and the AI-quality metrics, so it has to be right.
-     */
-    const hasQuantitySignal = /\b(\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|couple|dozen)\b/i.test(text);
-    const hasOrderVerb = /\b(want|order|add|get|give|have|take|like|gimme|lemme|please)\b/i.test(text);
-    if (!hasQuantitySignal && !hasOrderVerb) confidence = Math.min(confidence, 0.45);
+/* ═══════════════════════ time phrases ═══════════════════════ */
 
-    return normaliseInterpretation({
-      intent: 'ORDER_ADD', items, confidence, language, promoCode: findPromoCode(original),
-    });
-  }
+const T = String.raw`\d{1,2}(?:[:.]\d{2})?\s*(?:a\.?m\.?|p\.?m\.?|baje|bje|o'?clock)?`;
+const TIME_RES: RegExp[] = [
+  new RegExp(String.raw`(?:(?:i'?ll|i will|we'?ll|we will|i can|can i|could i|will|i'?m|i am|gonna)\s+)?(?:pick(?:\s+(?:it|them|this|that|the order))?\s*up|pickup|collect(?:\s+(?:it|them))?|come(?:\s+by)?|be there|arrive|reach|get there|be ready)?\s*(?:(?:it|them)\s+)?(?:at|around|by|after|before|till|until|@)\s*${T}\b`, 'gi'),
+  /\bin\s+(?:\d{1,3}|an?|one|half an?)\s*(?:min(?:ute)?s?|hours?|hrs?)\b/gi,
+  new RegExp(String.raw`\b\d{1,2}(?:[:.]\d{2})?\s*(?:a\.?m\.?|p\.?m\.?|baje|bje|o'?clock)(?![a-z])`, 'gi'),
+];
+const PICKUP_VERBS = /\b(?:i'?ll|i will|we'?ll|can i|could i)?\s*(?:pick(?:\s+(?:it|them))?\s*up|pickup|collect(?:\s+it)?|come by|come)\b(?:\s+(?:it|later|myself|instead))?/gi;
 
-  if (original.includes('?')) return normaliseInterpretation({ intent: 'MENU_QUESTION', question: original, confidence: 0.4, language });
-  return normaliseInterpretation({ intent: 'UNKNOWN', confidence: 0.2, language });
+export function hasTimeRequest(text: string): boolean {
+  return TIME_RES.some((re) => { re.lastIndex = 0; return re.test(text); });
 }
 
-function findPromoCode(text: string): string | undefined {
-  const m = text.match(/\b(?:code|promo|coupon)\s*[:\s]\s*([A-Z0-9]{3,20})\b/i);
-  return m?.[1];
+function stripTimePhrases(text: string): string {
+  let out = text;
+  for (const re of TIME_RES) { re.lastIndex = 0; out = out.replace(re, ' '); }
+  if (out !== text) { PICKUP_VERBS.lastIndex = 0; out = out.replace(PICKUP_VERBS, ' '); }
+  return out.replace(/\s+/g, ' ').trim();
 }
 
-/** Splits "2 burgers, fries and a coke" into orderable clauses. */
-function splitClauses(text: string): string[] {
-  return text
-    .replace(/\band\b/gi, ',')
-    .replace(/\bplus\b/gi, ',')
-    .replace(/\balso\b/gi, ',')
-    .split(/[,;]+/)
-    .map((c) => c.trim())
-    .filter(Boolean);
+/* ═══════════════════════ cleaning ═══════════════════════ */
+
+const FILLER_PHRASES = [
+  "i would like to have", "i would like", "i'd like", "i would love", "i'd love", "i'll have", "i will have", "i'll take",
+  "i will take", "i want to order", "i want", "i wanted", "i need", "we need", "we want", "we would like",
+  "we'll have", "can i get", "can i have", "could i get", "could i have", "may i have", "may i get",
+  "can you give me", "can we get", "give me", "get me", "gimme", "lemme get", "let me get", "let me have",
+  "send me", "send", "add", "order", "include", "pack", "make me", "please", "pls", "plz", "kindly",
+  "thank you", "thanks", "thx", "actually", "also", "just", "um", "uh", "hmm", "ok so", "okay so", "so",
+  "then", "for me", "for us", "to go", "take away", "takeaway", "parcel", "for pickup", "bhai", "bhaiya",
+  "boss", "sir", "madam", "yaar", "ji", "mujhe", "mujhko", "hume", "humein",
+].sort((a, b) => b.length - a.length);
+
+const FILLER_RE = new RegExp(String.raw`\b(?:${FILLER_PHRASES.map((f) => f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '\\s+')).join('|')})\b`, 'gi');
+const LEADING_VERB = /^(?:(?:i|we)\s+)?(?:(?:will|would|'ll|'d)\s+)?(?:like|want|need|have|take|get|grab|bring)(?:\s+to\s+(?:have|order|get))?\s+/i;
+const NOISE = /^(?:it|that|this|them|those|these|me|you|order|food|something|anything|stuff|everything|the|a|an|ok|okay|yes|no|hi|hello|thanks|and|or|more|too|as well)$/i;
+
+function clean(clause: string): string {
+  return clause
+    .replace(GREETING_PREFIX, ' ')
+    .replace(FILLER_RE, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(LEADING_VERB, '')
+    .trim();
+}
+
+/** Splits a message into orderable clauses: commas, "and", newlines, bullets, sentences, brackets. */
+export function splitClauses(text: string): string[] {
+  const s = text
+    .replace(/\r/g, '')
+    .replace(/^\s*[-*•·]\s*/gm, '')
+    .replace(/\n+/g, ' , ')
+    .replace(/[()[\]{}]/g, ' , ')
+    .replace(/(?<!\d)\.(?!\d)/g, ' , ')
+    .replace(/[;&+|]/g, ' , ')
+    .replace(/\b(?:and|plus|also|aur|then|with that|along with)\b/gi, ' , ');
+  return s.split(',').map((c) => c.trim()).filter(Boolean).flatMap(expandQuantityRuns);
+}
+
+/** "1 spicy 1 regular" → ["1 spicy", "1 regular"]; "one spicy one regular" likewise. */
+function expandQuantityRuns(clause: string): string[] {
+  const tokens = clause.toLowerCase().split(/\s+/);
+  const isQty = (t: string) => /^\d{1,3}$/.test(t) || (NUMBER_WORDS[t] !== undefined && t !== 'a' && t !== 'an');
+  const allModifiers = tokens.every((t) => isQty(t) || DESCRIPTOR_TOKENS.has(t) || SCOPE_WORDS.has(t));
+  const qtyCount = tokens.filter(isQty).length;
+  if (!allModifiers || qtyCount < 2) return [clause];
+  const parts: string[][] = [];
+  for (const t of clause.split(/\s+/)) {
+    if (isQty(t.toLowerCase()) || parts.length === 0) parts.push([t]); else parts[parts.length - 1].push(t);
+  }
+  return parts.map((p) => p.join(' '));
 }
 
 function leadingQuantity(clause: string): { quantity: number | null; rest: string } {
-  const digit = clause.match(/^\s*(\d{1,2})\s*x?\s+(.*)$/i);
-  if (digit) return { quantity: Number(digit[1]), rest: digit[2] };
-
+  const digit = clause.match(/^\s*(\d{1,3})\s*(?:x|×|\*)?\s+(.*)$/i);
+  if (digit) return { quantity: Number(digit[1]), rest: digit[2].replace(UNIT_WORDS, '') };
+  const dozen = clause.match(/^\s*(?:a|one)\s+dozen\s+(.*)$/i);
+  if (dozen) return { quantity: 12, rest: dozen[1] };
   const word = clause.match(/^\s*([a-z]+)\s+(.*)$/i);
   if (word && NUMBER_WORDS[word[1].toLowerCase()] !== undefined) {
-    return { quantity: NUMBER_WORDS[word[1].toLowerCase()], rest: word[2] };
+    return { quantity: NUMBER_WORDS[word[1].toLowerCase()], rest: word[2].replace(UNIT_WORDS, '') };
   }
   return { quantity: null, rest: clause };
 }
 
-const ORDER_VERBS = /\b(i(?:'| a)?m?\s*)?(would like|i'?ll have|i'?ll take|want|wanted|get me|give me|can i (?:get|have)|could i (?:get|have)|may i have|order|add|gimme|lemme get|please)\b/gi;
-
-function stripModifierWords(phrase: string): string {
-  return phrase
-    .replace(ORDER_VERBS, ' ')
-    .replace(/\b(please|thanks|thank you|for me|to go|takeout|pickup)\b/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+function trailingQuantity(phrase: string): { quantity: number | null; rest: string } {
+  const m = phrase.match(/^(.*?)\s+[x×*]\s*(\d{1,3})\s*$/i) ?? phrase.match(/^(.*?)\s+(\d{1,3})\s*(?:nos|pcs|plates?|pieces?)\s*$/i);
+  return m ? { quantity: Number(m[2]), rest: m[1].trim() } : { quantity: null, rest: phrase };
 }
 
-/** Pulls trailing/leading modifier phrases out of a clause. */
-function extractModifiers(clause: string): { base: string; modifiers: string[] } {
+/** Pulls "with X", "no X", "extra X", "without X" and descriptor words out of a phrase. */
+function extractModifiers(phrase: string): { base: string; modifiers: string[] } {
   const modifiers: string[] = [];
-  let base = clause;
+  let base = ` ${phrase} `;
 
-  // "with extra cheese", "no onions", "without pickles", "hold the mayo"
-  const withRe = /\b(with|w\/|no|without|hold(?:\s+the)?|add|extra|double|light)\s+([a-z][a-z\s]*?)(?=(?:\s+(?:with|w\/|no|without|hold|add|extra|double|light)\b)|$)/gi;
+  const withRe = /\b(with|w\/|no|without|hold(?:\s+the)?|extra|double|light|less)\s+([a-z][a-z ]*?)(?=\s+(?:with|w\/|no|without|hold|extra|double|light|less)\b|\s*$)/gi;
   let m: RegExpExecArray | null;
-  while ((m = withRe.exec(clause)) !== null) {
+  const found: string[] = [];
+  while ((m = withRe.exec(phrase)) !== null) {
     const lead = m[1].toLowerCase().replace(/\s+the$/, '');
     const body = m[2].trim();
     if (!body) continue;
-    if (lead === 'with' || lead === 'w/' || lead === 'add') modifiers.push(body);
+    if (lead === 'with' || lead === 'w/') modifiers.push(body);
     else if (lead === 'hold' || lead === 'without' || lead === 'no') modifiers.push(`no ${body}`);
     else modifiers.push(`${lead} ${body}`);
-    base = base.replace(m[0], ' ');
+    found.push(m[0]);
   }
+  for (const f of found) base = base.replace(f, ' ');
+  base = base.replace(/\s+/g, ' ').trim();
 
-  // Leading size/style adjectives stay in the base phrase (they identify the item),
-  // but are ALSO offered as modifier candidates so "large" can match a Size group.
-  const leading = base.trim().split(/\s+/)[0]?.toLowerCase();
-  if (leading && MODIFIER_LEADERS.includes(leading) && base.trim().split(/\s+/).length > 1) {
-    modifiers.push(leading);
+  // Descriptors at the end ("chicken biryani spicy") or start ("spicy chicken biryani").
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const d of DESCRIPTORS) {
+      const lower = base.toLowerCase();
+      if (lower.endsWith(` ${d}`) && base.length > d.length + 1) {
+        modifiers.push(d); base = base.slice(0, -d.length).trim(); changed = true; break;
+      }
+      const rest = lower.startsWith(`${d} `) ? base.slice(d.length).trim() : null;
+      if (rest && rest.split(/\s+/).length >= 2) {
+        modifiers.push(d); base = rest; changed = true; break;
+      }
+    }
   }
-
-  return { base: base.replace(/\s+/g, ' ').trim(), modifiers };
+  return { base, modifiers };
 }
 
+function isModifierOnly(text: string, hadQuantity: boolean): boolean {
+  const tokens = text.toLowerCase().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return false;
+  if (tokens.every((t) => DESCRIPTOR_TOKENS.has(t) || SCOPE_WORDS.has(t))) {
+    return tokens.some((t) => DESCRIPTOR_TOKENS.has(t));
+  }
+  return !hadQuantity && LEADERS.has(tokens[0]) && tokens.length <= 4;
+}
+
+/* ═══════════════════════ items ═══════════════════════ */
+
 export function extractItems(text: string): ItemPhrase[] {
-  const cleaned = text.replace(/[?!]+/g, ' ');
   const out: ItemPhrase[] = [];
   /**
-   * Modifier-only clauses always split from the LAST REAL DISH mentioned, not
-   * from whatever line happened to be pushed most recently. Without this,
-   * "2 biryani, one spicy, one regular" collapses both qualifiers onto the same
-   * line instead of producing one spicy and one regular.
+   * Qualifier clauses ("one spicy", "both regular", "extra raita") apply to
+   * the LAST REAL DISH mentioned, splitting its quantity where needed.
    */
   let anchor = -1;
 
-  for (const rawClause of splitClauses(cleaned)) {
-    const stripped = stripModifierWords(rawClause);
-    if (!stripped) continue;
+  for (const rawClause of splitClauses(text.replace(/[?!]+/g, ' '))) {
+    const noTime = stripTimePhrases(rawClause).replace(/\b(?:code|promo(?:\s*code)?|coupon)\s*[:\-]?\s*[a-z0-9]{3,20}\b/gi, ' ');
+    const cleaned = clean(noTime);
+    if (!cleaned) continue;
 
-    const { quantity, rest } = leadingQuantity(stripped);
-    const { base, modifiers } = extractModifiers(rest);
-    const phrase = base.trim();
+    const lead = leadingQuantity(cleaned);
+    const trail = trailingQuantity(lead.rest);
+    const quantity = lead.quantity ?? trail.quantity;
+    const scopeStripped = trail.rest.replace(/^(?:both|all|each|the other|other|another|the rest)\s+/i, '');
+    const { base, modifiers } = extractModifiers(scopeStripped);
+    const phrase = base.replace(/[^\p{L}\p{N}\s'&-]/gu, ' ').replace(/\s+/g, ' ').trim();
 
-    // Reject pure noise: needs at least one word that could be a food noun.
-    if (!phrase || phrase.length < 2) continue;
-    if (/^(it|that|this|them|those|these|me|you|order|food)$/i.test(phrase)) continue;
-
-    // "one spicy" after "2 chicken biryani" is not a second dish — it splits the
-    // anchor line into 1 spicy + however many remain unqualified.
-    if (isModifierOnlyPhrase(phrase) && anchor >= 0) {
-      const base = out[anchor];
-      const splitQty = quantity ?? base.quantity;
-
-      if (splitQty < base.quantity) {
-        base.quantity -= splitQty;
-        out.push({
-          phrase: base.phrase,
-          quantity: splitQty,
-          modifierPhrases: [...modifiers, phrase],
-        });
+    // A pure qualifier: attach to (and possibly split) the anchor dish.
+    const qualifierText = phrase ? `${phrase} ${modifiers.join(' ')}`.trim() : modifiers.join(' ');
+    const qualifierOnly = (!phrase && modifiers.length > 0) || (phrase && isModifierOnly(trail.rest, quantity !== null));
+    if (qualifierOnly && anchor >= 0) {
+      const target = out[anchor];
+      const mods = phrase && isModifierOnly(trail.rest, quantity !== null) ? [qualifierText] : modifiers;
+      const splitQty = quantity ?? target.quantity;
+      if (splitQty < target.quantity) {
+        target.quantity -= splitQty;
+        out.push({ phrase: target.phrase, quantity: splitQty, modifierPhrases: [...mods] });
       } else {
-        // Nothing left to split off — the qualifier describes the anchor itself.
-        base.modifierPhrases.push(phrase, ...modifiers);
+        target.modifierPhrases.push(...mods);
       }
       continue;
     }
 
-    out.push({
-      phrase,
-      quantity: quantity ?? 1,
-      modifierPhrases: modifiers,
-    });
+    if (!phrase || phrase.length < 2 || NOISE.test(phrase)) continue;
+    out.push({ phrase, quantity: quantity ?? 1, modifierPhrases: modifiers });
     anchor = out.length - 1;
   }
   return out;
+}
+
+/** The subject of a question: "do you have mango lassi?" → "mango lassi". */
+export function questionProbe(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[?!.,]/g, ' ')
+    .replace(new RegExp(String.raw`\b${ALLERGEN_WORDS}\b`, 'gi'), ' ')
+    .split(/\s+/)
+    .filter((w) => w && !QUESTION_WORDS.has(w) && !/^'?s$/.test(w))
+    .join(' ')
+    .replace(/^\d{1,3}\s+/, '')
+    .trim();
+}
+
+function findPromoCode(text: string): string | undefined {
+  return text.match(/\b(?:code|promo(?:\s*code)?|coupon)\s*[:\-]?\s*([A-Z0-9]{3,20})\b/i)?.[1]?.toUpperCase();
+}
+
+function wordToQty(w: string): number | null {
+  if (/^\d{1,3}$/.test(w)) return Number(w);
+  return NUMBER_WORDS[w.toLowerCase()] ?? null;
+}
+
+/* ═══════════════════════ interpret ═══════════════════════ */
+
+export function interpret(input: string): Interpretation {
+  const original = String(input || '').replace(/[\u{1F3FB}-\u{1F3FF}\uFE0F]/gu, '').trim();
+  if (!original) return normaliseInterpretation({ intent: 'UNKNOWN', confidence: 0 });
+
+  const language: Language = detectLanguage(original);
+  const text = language === 'en' ? original : normaliseForMatching(original);
+  const base = { language };
+  const r = (intent: Intent, extra: Record<string, unknown> = {}, confidence = 0.9) =>
+    normaliseInterpretation({ intent, confidence, ...base, ...extra });
+
+  // 1. Pure acknowledgements.
+  if (CONFIRM_RE.test(original) || HINDI_CONFIRM.test(original)) return r('CONFIRM', {}, 0.97);
+  if (DENY_RE.test(original) || HINDI_DENY.test(original)) return r('DENY', {}, 0.95);
+  if (GREETING_ONLY.test(original)) return r('GREETING', {}, 0.95);
+  if (SMALL_TALK.test(original)) return r('SMALL_TALK', {}, 0.9);
+
+  const core = text.replace(GREETING_PREFIX, '').trim();
+  if (!core) return r('GREETING', {}, 0.95);
+
+  // 2. Hindi question cues (specific enough to check regardless of detected language).
+  for (const cue of HINDI_QUESTION_CUES) {
+    if (cue.re.test(original)) {
+      const probe = questionProbe(normaliseForMatching(original));
+      return r(cue.intent as Intent, { question: original, probe }, 0.85);
+    }
+  }
+
+  // 3. Unambiguous intents.
+  for (const { intent, re } of PATTERNS) {
+    if (re.test(core)) return r(intent, { question: original }, 0.9);
+  }
+
+  const looksLikeQuestion = (/\?\s*$/.test(core) || INTERROGATIVE_START.test(core)) && !ORDER_REQUEST.test(core);
+
+  // 4. Dietary before allergen: "is paneer tikka vegetarian?" is not an allergy question.
+  if (looksLikeQuestion && DIETARY_RE.test(core)) return r('DIETARY_QUESTION', { question: original, probe: questionProbe(core) }, 0.85);
+  if (ALLERGEN_RE.test(core) && !ORDER_REQUEST.test(core)) return r('ALLERGEN_QUESTION', { question: original, probe: questionProbe(core) }, 0.85);
+
+  // 5. Questions about the restaurant.
+  if (/^\s*(?:the\s+)?menu\b|\b(?:send|show)\s+(?:me\s+)?(?:the\s+|your\s+)?menu\b|\bwhat(?:'?s| is) on (?:the|your) menu\b/i.test(core)) {
+    return r('MENU_QUESTION', { question: original, probe: '' }, 0.9);
+  }
+  if (looksLikeQuestion) {
+    const probe = questionProbe(core);
+    if (/\b(?:open|opens|close[sd]?|closing|hours|timings?)\b/i.test(core)) return r('HOURS_QUESTION', { question: original, probe });
+    if (/\bhow long\b|\bhow soon\b|\bwhen will\b.*\bready\b|\bwait(?:ing)? time\b|\bready (?:in|by)\b/i.test(core)) return r('PREP_TIME_QUESTION', { question: original, probe });
+    if (/\b(?:deals?|specials?|promos?|promotions?|discounts?|offers?|coupons?)\b/i.test(core)) return r('PROMO_QUESTION', { question: original, probe });
+    if (/\bhow much\b|\bcosts?\b|\bprices?\b|\brate\b/i.test(core)) return r('PRICE_QUESTION', { question: original, probe });
+    if (/\bdo you (?:have|serve|sell|make)\b|\bgot any\b|\bhave you got\b|\boptions?\b|\bavailable\b|\bwhat (?:do you|can i)\b/i.test(core)) {
+      return r('MENU_QUESTION', { question: original, probe });
+    }
+    if (!hasTimeRequest(core)) return r('FAQ_QUESTION', { question: original, probe }, 0.7);
+  }
+
+  // 6. Editing a draft.
+  const setRe1 = core.match(/^(?:actually\s+|no\s*,?\s*)?(?:make (?:it|that|them)|change (?:it|that|them)? ?to|update (?:it|that) to|just|only)\s+(\d{1,3}|[a-z]+)\s+(.+)$/i);
+  if (setRe1 && wordToQty(setRe1[1]) !== null) {
+    return r('ORDER_SET_QUANTITY', { setQuantities: [{ phrase: clean(setRe1[2]), quantity: wordToQty(setRe1[1]) }] }, 0.85);
+  }
+  const setRe2 = core.match(/\b(?:change|make|update|set)\s+(?:the\s+)?(.+?)\s+(?:to|into)\s+(\d{1,3}|[a-z]+)\s*$/i);
+  if (setRe2 && wordToQty(setRe2[2]) !== null) {
+    return r('ORDER_SET_QUANTITY', { setQuantities: [{ phrase: clean(setRe2[1]), quantity: wordToQty(setRe2[2]) }] }, 0.8);
+  }
+
+  const removal = core.match(/\b(?:remove|delete|take off|take out|drop|cancel|minus|skip|no more|hata do|hatao)\s+(?:the\s+|my\s+)?(.+)$/i);
+  if (removal) {
+    const removeItems = splitClauses(removal[1]).map((c) => {
+      const { quantity, rest } = leadingQuantity(clean(c));
+      return { phrase: rest.trim(), quantity: quantity ?? undefined };
+    }).filter((x) => x.phrase && !NOISE.test(x.phrase));
+    if (removeItems.length) return r('ORDER_REMOVE', { removeItems }, 0.85);
+  }
+
+  const modify = core.match(/^(?:actually\s+|and\s+|please\s+)?(?:make|have|can you make|please make)\s+(?:it|them|that|both|all|(?:the|my)\s+(.+?))\s+((?:extra |very |double |less |not |medium |mild )?(?:spicy|regular|mild|hot|normal|plain)|(?:with|without|no|extra|less)\s+.+)\s*$/i);
+  if (modify) return r('ORDER_MODIFY', { modifyPhrases: [modify[2].trim()], modifyTarget: modify[1]?.trim() }, 0.85);
+
+  // 7. Group / catering handled above; time-only messages.
+  const items = extractItems(core);
+  if (items.length === 0 && hasTimeRequest(core)) return r('PICKUP_TIME', { question: original }, 0.85);
+
+  // A message that is only a qualifier ("spicy", "extra raita", "no onions").
+  const cleanedCore = clean(stripTimePhrases(core));
+  if (items.length === 0 && cleanedCore) {
+    const { base: leftover, modifiers } = extractModifiers(cleanedCore);
+    if (modifiers.length && (!leftover || isModifierOnly(leftover, false))) {
+      return r('ORDER_MODIFY', { modifyPhrases: leftover ? [cleanedCore] : modifiers }, 0.8);
+    }
+    if (isModifierOnly(cleanedCore, false)) return r('ORDER_MODIFY', { modifyPhrases: [cleanedCore] }, 0.8);
+  }
+
+  if (items.length > 0) {
+    const hasQuantity = /\b(?:\d{1,3}|a|an|one|two|three|four|five|six|seven|eight|nine|ten|couple|dozen)\b/i.test(text);
+    const hasVerb = ORDER_REQUEST.test(core) || /\b(?:want|order|add|get|give|have|take|please|send)\b/i.test(core);
+    // Advisory only: the line confidence the console shows comes from menu matching.
+    const confidence = hasQuantity || hasVerb ? 0.9 : 0.45;
+    return r('ORDER_ADD', { items, promoCode: findPromoCode(original) }, confidence);
+  }
+
+  if (/\?/.test(core)) return r('FAQ_QUESTION', { question: original, probe: questionProbe(core) }, 0.5);
+  return r('UNKNOWN', { question: original }, 0.2);
 }

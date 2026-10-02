@@ -52,3 +52,14 @@ export function addMinutes(at: Date, minutes: number): Date {
 export function daysBetween(a: Date, b: Date): number {
   return Math.floor((b.getTime() - a.getTime()) / 86_400_000);
 }
+
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/** "7:45 PM" today, "tomorrow at 11:30 AM", or "Friday at 1:00 PM". */
+export function whenLabel(at: Date, now: Date, timeZone: string): string {
+  const a = localParts(at, timeZone);
+  const clock = minutesToClock(a.minuteOfDay);
+  if (a.dateKey === localParts(now, timeZone).dateKey) return clock;
+  if (a.dateKey === localParts(new Date(now.getTime() + 86_400_000), timeZone).dateKey) return `tomorrow at ${clock}`;
+  return `${DAY_NAMES[a.dayOfWeek]} at ${clock}`;
+}

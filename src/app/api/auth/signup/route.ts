@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { signUp, signIn } from '../../../../server/auth/service';
-import { SESSION_COOKIE, ACTIVE_RESTAURANT_COOKIE, errorResponse, json, rateLimit, clientKey } from '../../../../server/http';
+import { SESSION_COOKIE, ACTIVE_RESTAURANT_COOKIE, errorResponse, json, rateLimit, clientKey, readJson } from '../../../../server/http';
 
 export const runtime = 'nodejs';
 
@@ -9,7 +9,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     return json({ error: 'Too many signups from this address.' }, 429);
   }
   try {
-    const body = await request.json();
+    const body = await readJson(request);
     const result = await signUp({
       email: String(body.email ?? ''),
       password: String(body.password ?? ''),

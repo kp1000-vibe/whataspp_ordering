@@ -9,7 +9,8 @@ import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { orders, customers, conversations, restaurants, notifications } from '../../db/schema';
 import { newId } from '../../lib/ids';
-import { formatLocalTime } from '../../lib/time';
+import { whenLabel } from '../../lib/time';
+import { now as clockNow } from '../../lib/clock';
 import { log } from '../../lib/log';
 import { messagingFor } from '../messaging/registry';
 import { on } from '../events/bus';
@@ -67,7 +68,7 @@ async function sendToCustomer(
 export async function notifyConfirmed(scope: TenantScope, orderId: string): Promise<void> {
   const ctx = await contextFor(scope, orderId);
   if (!ctx) return;
-  const when = ctx.order.promisedReadyAt ? formatLocalTime(ctx.order.promisedReadyAt, ctx.timezone) : null;
+  const when = ctx.order.promisedReadyAt ? whenLabel(ctx.order.promisedReadyAt, clockNow(), ctx.timezone) : null;
   const body = [
     `${t(ctx.language, 'confirmed')} #${ctx.order.orderNumber}`,
     when ? `${t(ctx.language, 'willBeReady')} ${when}.` : '',
@@ -108,7 +109,7 @@ export async function delayOrder(
     updatedAt: new Date(),
   }).where(and(eq(orders.restaurantId, scope.restaurantId), eq(orders.id, orderId)));
 
-  const when = formatLocalTime(newReadyAt, ctx.timezone);
+  const when = whenLabel(newReadyAt, clockNow(), ctx.timezone);
   await sendToCustomer(scope, orderId,
     `${t(ctx.language, 'running_late')} ${when}. ${reason}`.trim());
 

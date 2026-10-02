@@ -73,6 +73,8 @@ export const restaurants = pgTable('restaurants', {
   timezone: text('timezone').notNull().default('America/Los_Angeles'),
   currency: text('currency').notNull().default('USD'),
   taxRateBps: integer('tax_rate_bps').notNull().default(0),   // basis points: 850 = 8.50%
+  /** Last order number issued. Incremented atomically so concurrent orders never collide. */
+  orderSeq: integer('order_seq').notNull().default(1000),
   isLive: boolean('is_live').notNull().default(false),
   createdAt: now(), updatedAt: upd(),
 }, (t) => [uniqueIndex('restaurants_slug_uq').on(t.slug)]);

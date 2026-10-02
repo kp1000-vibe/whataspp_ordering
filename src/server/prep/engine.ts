@@ -8,6 +8,7 @@ import { getDb } from '../../db/client';
 import { businessHours, holidayHours, restaurantSettings, orders, menuItems } from '../../db/schema';
 import { localParts, minutesToClock, addMinutes } from '../../lib/time';
 import type { TenantScope } from '../tenancy';
+import { now as clockNow } from '../../lib/clock';
 import { inArray, sql } from 'drizzle-orm';
 
 export type OpenState = {
@@ -23,7 +24,7 @@ export type OpenState = {
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 export async function openState(
-  scope: TenantScope, locationId: string, timezone: string, at = new Date(),
+  scope: TenantScope, locationId: string, timezone: string, at = clockNow(),
 ): Promise<OpenState> {
   const db = await getDb();
   const local = localParts(at, timezone);
@@ -118,7 +119,7 @@ export async function estimatePrep(
   args: { locationId: string; timezone: string; menuItemIds: string[]; at?: Date },
 ): Promise<PrepEstimate> {
   const db = await getDb();
-  const at = args.at ?? new Date();
+  const at = args.at ?? clockNow();
 
   const [settings] = await db.drizzle.select().from(restaurantSettings)
     .where(eq(restaurantSettings.restaurantId, scope.restaurantId)).limit(1);
@@ -138,8 +139,10 @@ export async function estimatePrep(
 
   const { rows } = await db.execute(
     `SELECT count(*)::int AS n FROM orders
-     WHERE restaurant_id = $1 AND location_id = $2 AND status = ANY($3);`,
-    [scope.restaurantId, args.locationId, ACTIVE_STATUSES as unknown as string[]],
+     WHERE restaurant_id = $1 AND location_id = $2 AND status IN ('RECEIVED','ACCEPTED','PREPARING');`,
+    // Literal list on purpose: binding a JS array crashed PGlite ("malformed array
+    // literal"), which silently killed every "how long will it take?" reply.
+    [scope.restaurantId, args.locationId],
   );
   const queueDepth: number = rows[0]?.n ?? 0;
   const atCapacity = queueDepth >= maxConcurrent;

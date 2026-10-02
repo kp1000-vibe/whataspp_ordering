@@ -10,6 +10,7 @@ import {
 } from '../../db/schema';
 import { newId } from '../../lib/ids';
 import { log } from '../../lib/log';
+import { now as clockNow } from '../../lib/clock';
 import { assertTransition, CUSTOMER_CANCELLABLE, type OrderStatus } from './state-machine';
 import { priceOrder, type LineSpec, type PricedOrder } from '../pricing/engine';
 import { allocateSlot, slotStartFor, getCapacity, type SlotAllocation } from '../capacity/slots';
@@ -56,10 +57,19 @@ async function restaurantPricingContext(scope: TenantScope, locationId: string, 
   };
 }
 
+/**
+ * One atomic UPDATE ... RETURNING. The old MAX(order_number)+1 read let two
+ * customers ordering at the same moment get the same number; one of them then
+ * failed on the unique index and got no reply at all (eval B12).
+ */
 async function nextOrderNumber(restaurantId: string): Promise<number> {
   const db = await getDb();
   const { rows } = await db.execute(
-    `SELECT COALESCE(MAX(order_number), 1000) + 1 AS n FROM orders WHERE restaurant_id = $1;`,
+    `UPDATE restaurants
+        SET order_seq = GREATEST(order_seq,
+              (SELECT COALESCE(MAX(order_number), 1000) FROM orders WHERE restaurant_id = $1)) + 1
+      WHERE id = $1
+      RETURNING order_seq AS n;`,
     [restaurantId],
   );
   return Number(rows[0].n);
@@ -78,7 +88,7 @@ export async function createDraftOrder(
   },
 ): Promise<{ order: OrderView; pricing: PricedOrder; allocation: SlotAllocation }> {
   const db = await getDb();
-  const at = args.at ?? new Date();
+  const at = args.at ?? clockNow();
   const ctx = { ...(await restaurantPricingContext(scope, args.locationId, args.customerId, at)), promoCode: args.promoCode ?? null };
   const pricing = await priceOrder(scope, args.specs, ctx);
 
@@ -116,6 +126,8 @@ export async function createDraftOrder(
     customerRequestedTime: !!args.requestedPickupAt,
     aiConfidence: confidences.length ? Math.min(...confidences) : null,
     correlationId: scope.correlationId,
+    createdAt: at,
+    updatedAt: at,
   });
 
   await writeLines(scope, orderId, pricing);
@@ -138,6 +150,9 @@ export async function updateDraftOrder(
   args: {
     orderId: string; specs: LineSpec[]; specialInstructions?: string;
     promoCode?: string | null; at?: Date; requestedPickupAt?: Date | null;
+    /** Did the CUSTOMER ask for this time? Defaults to whether a time was given. A held
+     *  slot at confirmation is not a customer request (it must not change the wording). */
+    customerRequested?: boolean;
   },
 ): Promise<{ order: OrderView; pricing: PricedOrder; allocation: SlotAllocation }> {
   const db = await getDb();
@@ -149,13 +164,14 @@ export async function updateDraftOrder(
     throw new Error(`Order ${existing!.orderNumber} is ${existing!.status} and can no longer be edited by the assistant.`);
   }
 
-  const at = args.at ?? new Date();
+  const at = args.at ?? clockNow();
   const ctx = { ...(await restaurantPricingContext(scope, existing!.locationId, existing!.customerId, at)), promoCode: args.promoCode ?? null };
   const pricing = await priceOrder(scope, args.specs, ctx);
   const allocation = await allocateSlot(scope, {
     locationId: existing!.locationId,
     menuItemIds: pricing.lines.map((l) => l.menuItemId),
-    requestedAt: args.requestedPickupAt ?? existing!.promisedReadyAt ?? null,
+    // Only keep the previous time if the customer asked for it; otherwise re-plan ASAP.
+    requestedAt: args.requestedPickupAt ?? (existing!.customerRequestedTime ? existing!.promisedReadyAt : null),
     at,
   });
 
@@ -181,9 +197,10 @@ export async function updateDraftOrder(
     prepMinutes: allocation.ok ? allocation.prepMinutes : existing!.prepMinutes,
     promisedReadyAt: allocation.ok ? allocation.promisedReadyAt : existing!.promisedReadyAt,
     pickupSlotStart: allocation.ok ? allocation.slot.start : null,
+    customerRequestedTime: args.customerRequested ?? (args.requestedPickupAt ? true : existing!.customerRequestedTime),
     aiConfidence: confidences.length ? Math.min(...confidences) : null,
     status: nextStatus,
-    updatedAt: new Date(),
+    updatedAt: at,
   }).where(eq(orders.id, args.orderId));
 
   if (nextStatus !== existing!.status) {
@@ -227,9 +244,10 @@ export async function transition(
 
   assertTransition(current!.status, args.to);
 
-  const patch: Record<string, unknown> = { status: args.to, updatedAt: new Date() };
-  if (args.to === 'CONFIRMED') patch.confirmedAt = new Date();
-  if (args.to === 'COMPLETED') patch.completedAt = new Date();
+  const at = clockNow();
+  const patch: Record<string, unknown> = { status: args.to, updatedAt: at };
+  if (args.to === 'CONFIRMED') patch.confirmedAt = at;
+  if (args.to === 'COMPLETED') patch.completedAt = at;
   if (args.to === 'CANCELLED' || args.to === 'REJECTED') patch.cancelledReason = args.reason ?? '';
 
   await db.drizzle.update(orders).set(patch).where(eq(orders.id, args.orderId));
@@ -298,7 +316,7 @@ export async function staffEditOrder(
   const existing = await getOrder(scope, args.orderId);
   assertSameTenant(scope, existing ?? undefined, 'order');
 
-  const at = new Date();
+  const at = clockNow();
   const ctx = await restaurantPricingContext(scope, existing!.locationId, existing!.customerId, at);
   const pricing = await priceOrder(scope, args.specs, ctx);
 
@@ -414,4 +432,54 @@ export async function attachConversation(scope: TenantScope, orderId: string, co
     .where(and(eq(orders.restaurantId, scope.restaurantId), eq(orders.id, orderId)));
   await db.drizzle.update(conversations).set({ activeDraftOrderId: orderId, updatedAt: new Date() })
     .where(eq(conversations.id, conversationId));
+}
+
+/* ─────────────────── expiry ─────────────────── */
+
+/**
+ * Drafts nobody confirmed. They hold no kitchen capacity, but leaving them
+ * open forever means an old "yes" days later could place a stale order.
+ */
+export async function expireStaleDrafts(
+  scope: TenantScope, opts: { olderThanMinutes?: number } = {},
+): Promise<number> {
+  const db = await getDb();
+  const cutoff = new Date(clockNow().getTime() - (opts.olderThanMinutes ?? 60) * 60_000);
+  const stale = await db.drizzle.select().from(orders).where(and(
+    eq(orders.restaurantId, scope.restaurantId),
+    inArray(orders.status, ['DRAFT', 'CLARIFICATION_REQUIRED', 'READY_FOR_CONFIRMATION']),
+  ));
+  let n = 0;
+  for (const o of stale as any[]) {
+    if (new Date(o.updatedAt) > cutoff) continue;
+    await transition(scope, { orderId: o.id, to: 'EXPIRED', actor: { type: 'SYSTEM' }, reason: 'draft not confirmed in time' });
+    await db.drizzle.update(conversations).set({ activeDraftOrderId: null })
+      .where(and(eq(conversations.restaurantId, scope.restaurantId), eq(conversations.activeDraftOrderId, o.id)));
+    n++;
+  }
+  return n;
+}
+
+/* ─────────────────── confirmation lock ─────────────────── */
+
+const locks = new Map<string, Promise<unknown>>();
+
+/**
+ * Serialises confirmations per location so two customers cannot both take the
+ * last seat in a pickup slot (eval B11). In-process: correct for one server.
+ * Running several web instances needs pg_advisory_xact_lock instead — see README.
+ */
+export async function withLocationLock<T>(locationId: string, fn: () => Promise<T>): Promise<T> {
+  const previous = locks.get(locationId) ?? Promise.resolve();
+  let release!: () => void;
+  const mine = new Promise<void>((r) => { release = r; });
+  const chained = previous.then(() => mine);
+  locks.set(locationId, chained);
+  await previous.catch(() => {});
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (locks.get(locationId) === chained) locks.delete(locationId);
+  }
 }

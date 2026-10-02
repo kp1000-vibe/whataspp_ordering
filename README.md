@@ -198,22 +198,69 @@ Switch providers with one env var; no business logic changes.
 | `npm run db:reset` | Wipe and reseed (refuses on non-PGlite) |
 | `npm run worker` | Background worker (production) |
 | `npm run print-agent` | Local print agent |
+| `npm run connect:whatsapp` | Connect / disconnect / check a WhatsApp number |
 
 ---
 
-## Connecting a real WhatsApp number
+## Connecting WhatsApp
 
 Uses the **official WhatsApp Business Platform** only. No scraping, no unofficial
 automation, ever.
 
-1. Create a Meta app, add WhatsApp, get a phone number id and permanent token.
-2. Set `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_APP_SECRET`,
-   `WHATSAPP_VERIFY_TOKEN`.
-3. Point the Meta webhook at `https://your-app/api/webhooks/whatsapp`, subscribe
-   to `messages`.
-4. Insert an `integrations` row of kind `whatsapp`, status `CONNECTED`, with
-   `publicConfig.displayPhoneNumber` set to the number in E.164 — that is how an
-   inbound webhook is routed to the right tenant.
+### Testing without a new number
+
+You do not need to buy or register a number to test with real WhatsApp. When you
+add the WhatsApp product to a Meta app, Meta issues a **free test sender number**.
+Your own personal WhatsApp plays the customer.
+
+1. At developers.facebook.com create an app and add the **WhatsApp** product.
+2. In **WhatsApp → API Setup**, note the test number's *Phone number ID* and copy
+   the *temporary access token* (valid 24 hours). Under **To**, add your own mobile
+   number and confirm the code Meta sends you. Up to 5 recipients are allowed.
+3. In **App Settings → Basic**, copy the *App Secret*.
+4. Pick any string as your verify token and put it in `.env.local`:
+   ```
+   WHATSAPP_VERIFY_TOKEN=pick-anything
+   ```
+5. Connect the demo restaurant to the test number. The script looks the display
+   number up from Meta, which also confirms your credentials work:
+   ```bash
+   npm run connect:whatsapp -- --phone-number-id <ID> --token <TOKEN> --app-secret <SECRET>
+   ```
+6. Start the app and give it a public URL (no account needed for a quick tunnel):
+   ```bash
+   npm run dev
+   npx cloudflared tunnel --url http://localhost:3000
+   ```
+7. In **WhatsApp → Configuration**, set the callback URL to
+   `https://<tunnel-host>/api/webhooks/whatsapp`, enter the same verify token,
+   and subscribe to the `messages` field.
+8. From your phone, WhatsApp the test number: `2 chicken biryani, one spicy, and 2 coke`.
+
+Test-number limits: it can only message the numbers you added in step 2, the
+temporary token expires after 24 hours (re-run step 5 with a fresh one), and it
+cannot be used for real customers.
+
+To go back to the simulator: `npm run connect:whatsapp -- --disconnect`.
+To check the current state: `npm run connect:whatsapp -- --status`.
+
+### Going live with a real number
+
+Same steps, with a permanent System User token and your own verified business
+number in place of the test sender. Set `ENCRYPTION_KEY` **before** connecting —
+the script encrypts the token with it, and without it the insecure dev fallback
+key is used.
+
+### What is verified
+
+The webhook route has been exercised over HTTP with a connected integration:
+Meta's GET handshake (right token 200, wrong token 403), unsigned / wrongly-signed
+/ tampered bodies all rejected with 401, a correctly signed message accepted, and
+Meta's at-least-once retry of the same message id deduplicated.
+
+**Not yet verified:** a round trip through Meta's real servers. Everything above
+used a locally computed signature. The first real message you send in step 8 is
+the first time the outbound `send()` call reaches Meta.
 
 The webhook **refuses unsigned requests in production** and logs loudly if it
 accepts one in development.

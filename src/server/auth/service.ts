@@ -11,6 +11,7 @@ import { users, sessions, staff, restaurants, organizations, restaurantSettings,
 import { newId, correlationId } from '../../lib/ids';
 import { hashPassword, verifyPassword, newSessionToken, sha256 } from '../../lib/crypto';
 import type { Role, TenantScope } from '../tenancy';
+import { ValidationError, ConflictError } from '../errors';
 
 const SESSION_DAYS = 30;
 
@@ -31,10 +32,19 @@ function normaliseEmail(email: string): string {
 }
 
 export function validatePassword(password: string): void {
-  if (password.length < 10) throw new AuthError('Password must be at least 10 characters.');
+  if (password.length < 10) throw new ValidationError('Password must be at least 10 characters.');
   if (!/[a-zA-Z]/.test(password) || !/\d/.test(password)) {
-    throw new AuthError('Password must contain a letter and a number.');
+    throw new ValidationError('Password must contain a letter and a number.');
   }
+}
+
+/** Indexed lookup (users_email_uq is on lower(email)) — never "load N rows and filter". */
+async function findUserByEmail(email: string): Promise<any | null> {
+  const db = await getDb();
+  const { rows } = await db.execute(`SELECT id FROM users WHERE lower(email) = lower($1) LIMIT 1;`, [email.trim()]);
+  if (!rows[0]) return null;
+  const [user] = await db.drizzle.select().from(users).where(eq(users.id, rows[0].id)).limit(1);
+  return user ?? null;
 }
 
 /** Creates org + restaurant + owner in one transaction-shaped flow. */
@@ -47,10 +57,10 @@ export async function signUp(args: {
   const email = normaliseEmail(args.email);
   validatePassword(args.password);
 
-  const existing = await db.drizzle.select().from(users).limit(200);
-  if (existing.some((u: any) => normaliseEmail(u.email) === email)) {
-    throw new AuthError('An account with that email already exists.');
-  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ValidationError('Please enter a valid email address.');
+  if (!args.restaurantName?.trim()) throw new ValidationError('Restaurant name is required.');
+  if (!args.name?.trim()) throw new ValidationError('Your name is required.');
+  if (await findUserByEmail(email)) throw new ConflictError('An account with that email already exists.');
 
   const userId = newId('usr');
   const organizationId = newId('org');
@@ -97,8 +107,7 @@ function slugify(name: string, fallbackId: string): string {
 
 export async function signIn(email: string, password: string): Promise<{ token: string; user: SessionUser }> {
   const db = await getDb();
-  const all = await db.drizzle.select().from(users).limit(500);
-  const user = all.find((u: any) => normaliseEmail(u.email) === normaliseEmail(email));
+  const user = await findUserByEmail(email);
 
   // Constant-ish work whether or not the user exists, to avoid enumeration.
   const ok = user ? verifyPassword(password, user.passwordHash) : verifyPassword(password, hashPassword('decoy-value'));
@@ -180,8 +189,7 @@ export async function addStaff(
   validatePassword(args.password);
 
   const email = normaliseEmail(args.email);
-  const all = await db.drizzle.select().from(users).limit(500);
-  let user = all.find((u: any) => normaliseEmail(u.email) === email);
+  let user = await findUserByEmail(email);
 
   if (!user) {
     const userId = newId('usr');
